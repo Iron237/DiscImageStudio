@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
@@ -186,6 +187,75 @@ class WorkflowTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):plan=worker.execute(request)
             with Image.open(Path(plan).parent/'target.png') as im:values.append(im.getpixel((2,2))[0])
         self.assertEqual(values,[188,128])
+
+    def test_10_parallel_export_and_resume_are_byte_identical(self):
+        with contextlib.redirect_stdout(io.StringIO()):plan=worker.execute(self.request('parallel-export'))
+        renderer=Renderer(plan);start=int(renderer.candidates()[len(renderer.candidates())//2])
+        options=dict(allow_unmeasured=True,fragment_clusters=96,start_cluster=start,log=lambda _:None)
+        reference=export(plan,self.root/'serial.bin',workers=1,**options)
+        parallel=export(plan,self.root/'parallel.bin',workers=4,**options)
+        self.assertEqual(reference.read_bytes(),parallel.read_bytes())
+        self.assertTrue(any(reference.read_bytes()))
+        resumed=self.root/'resumed.bin'
+        self.assertIsNone(export(plan,resumed,workers=4,work_limit=35,**options))
+        self.assertFalse(resumed.exists())
+        state=json.loads(Path(str(resumed)+'.partial.resume.json').read_text())
+        self.assertEqual(state['nextCandidate'],35)
+        # Worker count is scheduling only; the same checkpoint can resume with
+        # a different thread count, without changing bytes or sample hashes.
+        export(plan,resumed,workers=2,resume=True,**options)
+        self.assertEqual(reference.read_bytes(),resumed.read_bytes())
+        self.assertGreater(verify_export(plan,resumed,log=lambda _:None),0)
+
+    def test_11_parallel_failure_keeps_a_safe_checkpoint(self):
+        with contextlib.redirect_stdout(io.StringIO()):plan=worker.execute(self.request('failed-parallel-export'))
+        r=Renderer(plan);start=int(r.candidates()[len(r.candidates())//2])
+        options=dict(allow_unmeasured=True,fragment_clusters=96,start_cluster=start,log=lambda _:None)
+        original=Renderer.render_cluster
+        def failing(renderer,cluster):
+            if cluster==start+40:raise OSError('injected render failure')
+            return original(renderer,cluster)
+        output=self.root/'failed.bin'
+        with patch.object(Renderer,'render_cluster',failing):
+            with self.assertRaisesRegex(OSError,'injected render failure'):
+                export(plan,output,workers=4,**options)
+        self.assertFalse(output.exists())
+        self.assertTrue(Path(str(output)+'.partial.resume.json').exists())
+        export(plan,output,workers=2,resume=True,**options)
+        reference=export(plan,self.root/'failure-reference.bin',workers=1,**options)
+        self.assertEqual(reference.read_bytes(),output.read_bytes())
+
+    def test_12_parallel_color_preserves_grid_and_predictions(self):
+        plans=[]
+        for count in (1,2):
+            request=self.request(f'color-workers-{count}')
+            request['workers']=count
+            request['configuration']['patch'].update(widthMm=6.,heightMm=6.)
+            request['configuration']['tone']={'ditherStrength':.95,'brightness':0.,'srgbLinearization':True}
+            with contextlib.redirect_stdout(io.StringIO()):plans.append(Path(worker.execute(request)))
+        data=[json.loads(p.read_text(encoding='utf-8')) for p in plans]
+        self.assertEqual(data[1]['execution']['colorWorkers'],2)
+        for name in ('texture_ids.npy','target.png','predicted.png','gamut_error.png'):
+            self.assertEqual((plans[0].parent/name).read_bytes(),(plans[1].parent/name).read_bytes(),name)
+        self.assertEqual(data[0]['metrics'],data[1]['metrics'])
+
+    def test_13_automatic_workers_see_all_available_processors(self):
+        from bdcolor.parallel import worker_count
+        with patch('bdcolor.parallel.available_cpus',return_value=24):
+            self.assertEqual(worker_count(0),24)
+            self.assertEqual(worker_count(1),1)
+            self.assertEqual(worker_count(128),24)
+        for value in (-1,1.5,'NaN'):
+            with self.assertRaises(ValueError):worker_count(value)
+
+    def test_14_legacy_random_dither_is_parallel_schedule_independent(self):
+        plans=[]
+        for count in (1,2):
+            request=self.request(f'legacy-color-workers-{count}');request['workers']=count
+            request['configuration']['patch'].update(widthMm=6.,heightMm=6.)
+            with contextlib.redirect_stdout(io.StringIO()):plans.append(Path(worker.execute(request)))
+        self.assertEqual((plans[0].parent/'texture_ids.npy').read_bytes(),(plans[1].parent/'texture_ids.npy').read_bytes())
+        self.assertEqual((plans[0].parent/'predicted.png').read_bytes(),(plans[1].parent/'predicted.png').read_bytes())
 
 
 if __name__ == '__main__':

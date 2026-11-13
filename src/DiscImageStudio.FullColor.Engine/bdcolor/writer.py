@@ -6,7 +6,9 @@ or UDF filesystem. Burn as an image; do not repack it as a data disc.
 from __future__ import annotations
 import hashlib,json,math,os,shutil,time
 from pathlib import Path
+from contextlib import closing
 import numpy as np
+from .parallel import worker_count,ordered_map,requested_workers,adaptive_threads,enable_all_cpus
 from .core import (Geometry,MaskBank,payload_layout,SECTOR_BYTES,CLUSTER_BYTES,
                    CHANNEL_BITS_PER_RUB)
 from .colour import texture_digest,optical_signature
@@ -181,7 +183,7 @@ def _initialize_output(file,length):
     return False
 
 
-def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_cluster=None,resume=False,work_limit=None,log=print):
+def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_cluster=None,resume=False,work_limit=None,log=print,workers=None):
     renderer=Renderer(plan_path);p=renderer.plan;out=Path(output)
     if p['responseMode'].startswith('unmeasured') and not allow_unmeasured:
         raise ValueError('This image uses an UNMEASURED color surrogate. Inspect preview/error maps, then explicitly add --allow-unmeasured to export a trial image. No accurate physical color is promised.')
@@ -218,6 +220,39 @@ def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_
         if not 0<=begin<=len(work): raise ValueError('Bad resume cursor.')
         log(f'Resuming at candidate {begin:,}/{len(work):,}.')
     stop=len(work) if work_limit is None else min(len(work),begin+int(work_limit))
+    if requested_workers(workers)==0: enable_all_cpus()
+    maximum_workers=worker_count(workers)
+    cpu_workers=maximum_workers
+    batch_size=32
+    probes=[]
+    if cpu_workers>1 and stop>begin:
+        # Initialize once before sharing the read-only 64 MiB mask bank. Each
+        # renderer task owns its NumPy temporaries and 64 KiB output buffers.
+        renderer.maskbank=MaskBank()
+    def render_batch(bounds):
+        return [(k,renderer.render_cluster(int(work[k]))) for k in range(*bounds)]
+    if requested_workers(workers)==0:
+        remaining=stop-begin
+        if maximum_workers>1 and remaining>=8192:
+            sample_size=min(remaining,max(256,maximum_workers*32))
+            sample_batches=[(int(k),min(stop,int(k)+8)) for k in np.linspace(begin,stop-8,max(1,sample_size//8),dtype=np.int64)]
+            sample_count=sum(b-a for a,b in sample_batches)
+            log(f'CPU export: probing all {maximum_workers} available logical CPUs.')
+            cpu_workers,probes=adaptive_threads(render_batch,sample_batches,maximum_workers,sample_count,log)
+            best=next(m for m in probes if m['workers']==cpu_workers)
+            batch_size=max(4,min(64,int(best['clustersPerSecond']*.15/cpu_workers)))
+        else:
+            cpu_workers=min(maximum_workers,max(1,math.ceil(remaining/batch_size)))
+    # Limit buffered payloads to 256 MiB even on machines with many CPUs.
+    batch_size=min(batch_size,max(1,256*1024*1024//(2*cpu_workers*CLUSTER_BYTES)))
+    log(f'CPU export: {cpu_workers}/{maximum_workers} render threads; ordered writes; {batch_size} clusters/batch.')
+    def rendered_clusters():
+        if cpu_workers==1:
+            for k in range(begin,stop): yield k,renderer.render_cluster(int(work[k]))
+        else:
+            batches=((k,min(stop,k+batch_size)) for k in range(begin,stop,batch_size))
+            with closing(ordered_map(render_batch,batches,cpu_workers)) as results:
+                for batch in results: yield from batch
     clock=time.monotonic();last=clock
     def save_checkpoint(next_index,stream):
         stream.flush();os.fsync(stream.fileno())
@@ -230,17 +265,18 @@ def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_
         if not resume:
             _initialize_output(f,length);save_checkpoint(0,f)
         try:
-            for k in range(begin,stop):
-                cluster=work[k];data=renderer.render_cluster(int(cluster))
-                f.seek((int(cluster)-base)*CLUSTER_BYTES)
-                # Write even zero clusters when resuming: this makes replay idempotent.
-                if np.any(data) or resume: f.write(data.tobytes())
-                if k<3 or k==len(work)//2 or k==len(work)-1:
-                    sample_hashes[str(int(cluster))]=hashlib.sha256(data.tobytes()).hexdigest()
-                if (k+1)%1000==0:save_checkpoint(k+1,f)
-                now=time.monotonic()
-                if now-last>2 or k+1==stop:
-                    log(f'Export: {k+1:,}/{len(work):,} candidate clusters');last=now
+            with closing(rendered_clusters()) as rendered:
+                for k,data in rendered:
+                    cluster=work[k]
+                    f.seek((int(cluster)-base)*CLUSTER_BYTES)
+                    # Write even zero clusters when resuming: this makes replay idempotent.
+                    if np.any(data) or resume: f.write(data.tobytes())
+                    if k<3 or k==len(work)//2 or k==len(work)-1:
+                        sample_hashes[str(int(cluster))]=hashlib.sha256(data.tobytes()).hexdigest()
+                    if (k+1)%1000==0:save_checkpoint(k+1,f)
+                    now=time.monotonic()
+                    if now-last>2 or k+1==stop:
+                        log(f'Export: {k+1:,}/{len(work):,} candidate clusters');last=now
             save_checkpoint(stop,f)
         except BaseException:
             # The last committed checkpoint is safe; uncommitted clusters are
@@ -258,6 +294,7 @@ def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_
         'planSha256':hashlib.sha256(Path(plan_path).read_bytes()).hexdigest(),
         'gridSha256':p['gridSha256'],'textureDigest':p['textureDigest'],'opticalSignature':p['opticalSignature'],
         'responseMode':p['responseMode'],'startCluster':base,'sampleClusterSha256':sample_hashes,
+        'execution':{'availableWorkers':maximum_workers,'renderWorkers':cpu_workers,'batchClusters':batch_size,'cpuProbes':probes},
         'seconds':round(accumulated+time.monotonic()-clock,3),
         'warning':'Pure drawing raw sectors; no ISO9660/UDF. This file is not an upstream DIS bd-r-image-v1 sidecar; DIS AA/44 preview cannot reproduce these colors.'}
     save_json(str(out)+'.json',metadata)

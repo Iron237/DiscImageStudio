@@ -37,11 +37,23 @@
 
 ## 构建与部署
 
+### CPU 自适应并行
+
+默认 `0 = 自动`，不再固定为 8 线程。自动模式识别可用逻辑 CPU；在 Windows 的计算进程内启用完整系统 CPU 掩码（系统作业限制仍有效），避免混合架构处理器只使用部分核心。不会修改系统全局设置。OpenBLAS 自动绑核关闭，每个颜色求解进程内部的 BLAS 固定为 1 线程，防止多层线程池相乘。
+
+- 颜色求解按行分块，使用 `spawn` 多进程突破 Python GIL；按 CPU、任务量和可用内存决定进程数。先以原行序冻结原光谱缓存，旧随机抖动保存每行 RNG 起点，使点阵、预测图和残差不随调度改变。
+- 大型 ISO 导出在当前计划上短测 `1、2、4…全部可用线程` 的实际吞吐，选择接近最佳速度的最小并行度，并调整每批簇数。全部线程都会纳入探测；内存带宽或磁盘成为瓶颈时，不用更高 CPU 占用率换取更低吞吐。
+- 至多预提交两倍并行数的批次，导出预取的有效载荷缓冲不超过 256 MiB；掩码库共享只读。写盘、抽样哈希和断点保持原顺序。旧计划、旧 `.partial.resume.json` 可继续使用，续算允许改变线程数。
+
+日志会显示可用 CPU、各档探测速度、选中的并行度和行/簇批大小。高级测试可在启动程序前设置 `DIS_FULLCOLOR_WORKERS=1` 运行原顺序路径，或设置正整数固定并行度；未设置或 `0` 使用自动模式。性能参数不会改动颜色模型、盘片几何或纹理选择。
+
 ```powershell
 dotnet publish src/DiscImageStudio.App/DiscImageStudio.App.csproj -c Release -r win-x64 --self-contained true -o artifacts/fullcolor
 ./tools/setup-fullcolor.ps1 -AppDirectory artifacts/fullcolor
 ./artifacts/fullcolor/DiscImageStudio.exe
 ```
+
+开发目录可直接使用：`dotnet build -c Release` 后运行 `./tools/setup-fullcolor.ps1 -AppDirectory src/DiscImageStudio.App/bin/Release/net10.0-windows`，再启动该目录的 `DiscImageStudio.exe`；无需发布成单文件。只更新 Python 后端时，可同步 `FullColorEngine/` 后用于下一次任务，正在运行的任务仍使用已载入的代码。
 
 主程序及界面仍为 DIS 原生 WPF。数值后端来自此前核验的 BDColorLab 64099 v0.1，源码在 `src/DiscImageStudio.FullColor.Engine/`，随应用复制到 `FullColorEngine/`。使用独立 Python 3.10+ 环境，依赖 NumPy、Pillow、SciPy；安装脚本建立 `FullColorRuntime/`，不改系统 Python。高级设置可改选已有环境，也可在启动前设置 `DIS_FULLCOLOR_PYTHON`。
 

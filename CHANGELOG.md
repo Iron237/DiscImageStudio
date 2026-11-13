@@ -4,6 +4,7 @@
 
 ### 中文
 
+- 全彩加入 CPU 自适应并行：颜色求解按行多进程计算，ISO 导出探测至全部可用逻辑线程后按吞吐选择并行度；保留点阵/镜像字节一致性、有界内存、取消和旧断点续算。开发目录可继续直接运行。
 - 修复全彩预览只取盘面上方小窗口导致黑图的问题：默认转换完整记录环，继承原生白底、亮度、sRGB 和抖动强度；模型纹理点阵使用 DIS 的确定性抖动相位。增加原生 BD 黑白与实际纹理点阵对照。Windows 完整镜像使用原生稀疏清零，避免预分配写零阻塞。
 - 本 fork 新增原生「全彩」工作流：64099 图片与模型预览、绘图/光路参数编辑、方案保存、64 纹理标定及完整 ISO 输出；任务复用 DIS 的进度与取消。数值后端使用独立 Python 环境。实盘全彩仍未验证。
 
@@ -16,6 +17,7 @@
 
 ### English
 
+- Add adaptive CPU parallelism to Full Color: solve color rows in separate processes and probe ISO rendering up to all available logical CPUs before choosing throughput. Preserve deterministic grids/bytes, bounded buffering, cancellation and existing export checkpoints. Development-folder execution remains supported.
 - Fix black Full Color previews caused by the former upper-disc crop. Convert the complete annulus, inherit native white alpha/tone settings, and allocate model textures with DIS dither phases. Add native monochrome and texture-dot references. Initialize Windows full images through sparse zero ranges instead of blocking CRT zero writes.
 - This fork adds a native Full Color workflow for 64099 BD-R: image/model previews, patch and optical parameter editing, saved recipes, 64-texture calibration and full ISO export, using the DIS job progress and cancellation surface. The numerical backend uses an isolated Python runtime. Physical full color remains unverified.
 

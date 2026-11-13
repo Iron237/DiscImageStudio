@@ -27,7 +27,7 @@ flowchart LR
 
 ## Core 契约
 
-本 fork 的 `Workspace.FullColor` 是设计页的下游：`FullColorViewModel` 直接请求 `Design.EnsureExportCompositeAsync()`，继承完整可见图层布局，再按盘面物理坐标采样实验矩形。不可变计划记录设计指纹；设计、几何或参数变化后，预览、导出与刻录都会失效。选用全彩时，导出页消费该计划，刻录页消费同一设计已导出的完整 ISO。`Services/FullColorEngine` 只负责 JSON 请求、进程与进度/取消适配；编码和光学求解在 `DiscImageStudio.FullColor.Engine`，不放进 Core 或控件。参数方案保存为 `.bdcolor.json`，图像来源始终归当前工程设计。全彩 ISO 禁用普通 AA/44 读回入口。详见 [FULL_COLOR.md](FULL_COLOR.md)。
+本 fork 的 `Workspace.FullColor` 是设计页的下游：`FullColorViewModel` 直接请求 `Design.EnsureExportCompositeAsync()`，继承完整可见图层布局，再按盘面物理坐标采样整个记录环（标定模式才使用矩形窗口）。不可变计划记录设计指纹；设计、几何或参数变化后，预览、导出与刻录都会失效。选用全彩时，导出页消费该计划，刻录页消费同一设计已导出的完整 ISO。`Services/FullColorEngine` 只负责 JSON 请求、进程与进度/取消适配；编码和光学求解在 `DiscImageStudio.FullColor.Engine`，不放进 Core 或控件。颜色求解在 `bdcolor/solve.py` 按行分配到独立进程，冻结原顺序光谱缓存与随机流，结果按行索引汇合；ISO 在 `writer.py` 并行计算簇，输出与断点由单一写线程按原顺序提交。`parallel.py` 负责 CPU/内存限制、自适应吞吐探测和有界任务队列。工作进程不能访问输出句柄，调度参数不属于光学签名。参数方案保存为 `.bdcolor.json`，图像来源始终归当前工程设计。全彩 ISO 禁用普通 AA/44 读回入口。详见 [FULL_COLOR.md](FULL_COLOR.md)。
 
 `DiscImageStudio.Core` 不引用 WPF、CD、DVD 或任何具体编码器，并以 `net10.0` 为目标。
 

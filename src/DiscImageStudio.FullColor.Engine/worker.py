@@ -13,6 +13,15 @@ import sys
 import traceback
 import uuid
 import shutil
+import os
+# Parallelism is at row/cluster level. Prevent each child from starting its own
+# BLAS team and oversubscribing the machine (e.g. 16 processes x 24 threads).
+for _library_variable in ('OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THREADS'):
+    os.environ[_library_variable]='1'
+# Let the job scheduler use the inherited CPU mask. Some OpenBLAS builds pin
+# hybrid CPUs to a smaller subset when imported; do not let that hide E-cores.
+# https://github.com/OpenMathLib/OpenBLAS/blob/develop/docs/runtime_variables.md
+os.environ['OPENBLAS_MAIN_FREE']='1'
 from bdcolor.colour import build_spectra
 from bdcolor.pipeline import build_plan, calibration_plan, save_json, image_to_rgb, render_patch
 from bdcolor.writer import export, verify_export
@@ -89,7 +98,7 @@ def execute(request):
             source = sample_design_composite(request, directory)
             save_json(config, request['configuration'])
             result = build_plan(source, config, spectra, directory,
-                                request.get('measurementsPath') or None, log=emit)
+                                request.get('measurementsPath') or None, log=emit, workers=request.get('workers'))
         else:
             request['configuration']['imageLayout']='patch'
             save_json(config, request['configuration'])
@@ -102,7 +111,7 @@ def execute(request):
     elif operation == 'export':
         result = export(request['planPath'], request['outputPath'],
                         allow_unmeasured=bool(request.get('allowUnmeasured')),
-                        resume=bool(request.get('resume')), log=emit)
+                        resume=bool(request.get('resume')), log=emit, workers=request.get('workers'))
         verify_export(request['planPath'], result, log=emit)
     else:
         raise ValueError('Unsupported full-color operation: ' + operation)

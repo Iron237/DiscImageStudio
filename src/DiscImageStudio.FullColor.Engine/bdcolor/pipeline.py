@@ -5,8 +5,8 @@ import numpy as np
 from PIL import Image,ImageOps,ImageDraw
 from .core import Geometry
 from .colour import (load_spectra,Response,RGB_TO_XYZ,XYZ_TO_RGB,to_linear,to_srgb,
-                     fit_weights,optical_signature,texture_digest,local_geometry)
-from .dis_dither import allocate
+                     optical_signature,texture_digest)
+from .solve import solve_colors
 
 
 def save_json(path,obj):
@@ -75,7 +75,7 @@ def captioned_preview(image,text,path):
     canvas.save(path)
 
 
-def build_plan(input_path,config_path,spectra_path,out,measurements=None,log=print):
+def build_plan(input_path,config_path,spectra_path,out,measurements=None,log=print,workers=None):
     cfg=load_config(config_path);out=check_output_dir(out)
     textures,freq,spec=load_spectra(spectra_path)
     response=Response(cfg,textures,freq,spec,measurements)
@@ -94,42 +94,7 @@ def build_plan(input_path,config_path,spectra_path,out,measurements=None,log=pri
     valid=np.ones((ny,nx),bool)
     if cfg.get('imageLayout')=='disc-annulus':
         valid=(radii>=cfg['geometry']['innerRadiusMm'])&(radii<=cfg['geometry']['outerRadiusMm'])
-    # Low-resolution grid describes MACRO pixels; texture ID grid is sub times finer.
-    texture_grid=np.zeros((ny*sub,nx*sub),np.uint16)
-    predicted=np.zeros((ny,nx,3));residual=np.zeros((ny,nx));mismatch=np.zeros((ny,nx));delta_grid=np.zeros((ny,nx))
-    rng=np.random.default_rng(64099);N=sub*sub
-    for iy in range(ny):
-        y=cy+h/2-(iy+.5)*macro
-        for ix in range(nx):
-            x=cx-w/2+(ix+.5)*macro
-            if not valid[iy,ix]: continue
-            if not response.measured and not np.any(target[iy,ix]):
-                predicted[iy,ix]=cfg['optics']['backgroundLevel']*np.array([.95047,1.,1.08883])
-                residual[iy,ix]=np.linalg.norm(predicted[iy,ix])
-                delta_grid[iy,ix],mismatch[iy,ix]=local_geometry(x,y,cfg)
-                continue
-            ids,xyz=response.at(x,y)
-            chosen,weights,_=fit_weights(ids,xyz,target[iy,ix])
-            # Stratified area allocation, spatially shuffled. It is not a color
-            # PNG being re-quantized by DIS: these are actual Q-motif identifiers.
-            if 'tone' in cfg:
-                source=cfg['designRaster'];sw,sh=source['width'],source['height'];radius=source['radiusMm']
-                mx=cx-w/2+(ix*sub+np.arange(sub)+.5)*micro
-                my=cy+h/2-(iy*sub+np.arange(sub)+.5)*micro
-                px=np.clip(np.floor((mx+radius)*sw/(2*radius)).astype(np.int64),0,sw-1)
-                py=np.clip(np.floor((radius-my)*sh/(2*radius)).astype(np.int64),0,sh-1)
-                selected=allocate(chosen,weights,(py[:,None]*sw+px[None,:]).ravel(),cfg['tone']['ditherStrength'])
-            else:
-                u=(np.arange(N)+rng.random())/N
-                selected=chosen[np.searchsorted(np.cumsum(weights),u,side='right').clip(max=len(chosen)-1)]
-                rng.shuffle(selected)
-            texture_grid[iy*sub:(iy+1)*sub,ix*sub:(ix+1)*sub]=selected.reshape(sub,sub)
-            actual_weights=np.array([(selected==k).mean()for k in ids])
-            pr=actual_weights@xyz
-            predicted[iy,ix]=pr
-            residual[iy,ix]=np.linalg.norm(pr-target[iy,ix])
-            delta_grid[iy,ix],mismatch[iy,ix]=local_geometry(x,y,cfg)
-        if iy%8==0 or iy+1==ny: log(f'Color solve: row {iy+1}/{ny}')
+    texture_grid,predicted,residual,delta_grid,mismatch,cpu_workers=solve_colors(cfg,response,target,valid,p,workers,log)
     display=to_srgb((predicted/cfg['optics']['targetExposure'])@XYZ_TO_RGB.T)
     intended=Image.fromarray(np.round((to_srgb(linear) if 'tone' in cfg else rgb)*255).astype(np.uint8))
     modeled=Image.fromarray(np.round(display*255).astype(np.uint8))
@@ -151,6 +116,7 @@ def build_plan(input_path,config_path,spectra_path,out,measurements=None,log=pri
           'responseMode':'measured' if response.measured else 'unmeasured-17pp-1d-surrogate',
           'gridFile':'texture_ids.npy','gridSha256':gridhash,'inputSha256':hashlib.sha256(Path(input_path).read_bytes()).hexdigest(),
           'inputName':Path(input_path).name,'gridWidth':texture_grid.shape[1],'gridHeight':texture_grid.shape[0],
+          'execution':{'colorWorkers':cpu_workers},
           'metrics':{'meanXYZResidual':float(residual[valid].mean()),'maximumXYZResidual':float(residual.max()),
                      'activeMacrocellCount':int(valid.sum()),'coloredMacrocellCount':int(np.count_nonzero(np.any(linear>0,axis=2)&valid)),
                      'deltaRange':[float(delta_grid[valid].min()),float(delta_grid[valid].max())],

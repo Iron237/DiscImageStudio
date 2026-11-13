@@ -47,15 +47,17 @@ jobs:
           else { Write-Output 'Full-size ISO test needs 26 GB free; testing native preview and encoded fragments on this runner.' }
           dotnet run --project tests/DiscImageStudio.ArchitectureTests -c Release --no-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Publish the Windows app with its color engine
+      - name: Check the development app directory and color engine
         shell: pwsh
         run: |
-          dotnet publish src/DiscImageStudio.App/DiscImageStudio.App.csproj -c Release -r win-x64 --self-contained true -o artifacts/fullcolor
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path artifacts/fullcolor/FullColorEngine/worker.py)) { throw 'Color engine missing from package' }
-          if (-not (Test-Path artifacts/fullcolor/FullColorEngine/configs/verbatim_64099.json)) { throw 'Color configuration missing from package' }
+          $app = 'src/DiscImageStudio.App/bin/Release/net10.0-windows'
+          if (-not (Test-Path "$app/DiscImageStudio.exe")) { throw 'Development app host missing' }
+          if (-not (Test-Path "$app/FullColorEngine/worker.py")) { throw 'Color engine missing from build output' }
+          if (-not (Test-Path "$app/FullColorEngine/bdcolor/parallel.py")) { throw 'CPU scheduler missing from build output' }
+          if (-not (Test-Path "$app/FullColorEngine/bdcolor/solve.py")) { throw 'Parallel solver missing from build output' }
+          if (-not (Test-Path "$app/FullColorEngine/configs/verbatim_64099.json")) { throw 'Color configuration missing from build output' }
       - uses: actions/upload-artifact@v4
         with:
-          name: DiscImageStudio-FullColor-win-x64
-          path: artifacts/fullcolor/
+          name: DiscImageStudio-FullColor-development-win-x64
+          path: src/DiscImageStudio.App/bin/Release/net10.0-windows/
           retention-days: 14
