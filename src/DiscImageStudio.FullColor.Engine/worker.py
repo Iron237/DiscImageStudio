@@ -12,10 +12,11 @@ import re
 import sys
 import traceback
 import uuid
+import shutil
 from bdcolor.colour import build_spectra
-from bdcolor.pipeline import build_plan, calibration_plan, save_json, image_to_rgb
+from bdcolor.pipeline import build_plan, calibration_plan, save_json, image_to_rgb, render_patch
 from bdcolor.writer import export, verify_export
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 def emit(message, fraction=None):
@@ -32,23 +33,29 @@ def sample_design_composite(request, directory):
     radius = float(request['canvasOuterRadiusMm'])
     if not math.isfinite(radius) or radius <= 0:
         raise ValueError('Invalid design canvas radius.')
-    image = image_to_rgb(request['inputPath'])
+    image = image_to_rgb(request.get('toneInputPath') or request['inputPath'])
     if image.width != image.height:
         raise ValueError('The design composite must be a square disc-coordinate raster.')
-    image.save(directory / 'design-composite.png')
-    p = request['configuration']['patch']
+    shutil.copyfile(request['inputPath'],directory / 'design-composite.png')
+    if request.get('nativeDitherPath'):
+        shutil.copyfile(request['nativeDitherPath'],directory / 'native-dither.png')
+    cfg=request['configuration']
+    cfg['designRaster']={'width':image.width,'height':image.height,'radiusMm':radius}
+    p = render_patch(cfg)
     cx, cy = p['centerMm']
     width, height = p['widthMm'], p['heightMm']
     box = ((cx - width/2 + radius) * image.width / (2*radius),
            (radius - cy - height/2) * image.height / (2*radius),
            (cx + width/2 + radius) * image.width / (2*radius),
            (radius - cy + height/2) * image.height / (2*radius))
-    if not (0 <= box[0] < box[2] <= image.width and 0 <= box[1] < box[3] <= image.height):
+    if cfg.get('imageLayout')!='disc-annulus' and not (0 <= box[0] < box[2] <= image.width and 0 <= box[1] < box[3] <= image.height):
         raise ValueError('The color patch must stay within the design canvas.')
     nx, ny = round(width / p['macrocellMm']), round(height / p['macrocellMm'])
     if min(nx, ny) <= 0:
         raise ValueError('Color sampling dimensions must be positive.')
-    sampled = image.resize((nx, ny), Image.Resampling.LANCZOS, box=box)
+    border=max(0,math.ceil(max(-box[0],-box[1],box[2]-image.width,box[3]-image.height)))+2
+    expanded=ImageOps.expand(image,border=border,fill='white')
+    sampled = expanded.resize((nx, ny), Image.Resampling.LANCZOS, box=tuple(v+border for v in box))
     path = directory / 'design-patch.png'
     sampled.save(path)
     return path
@@ -80,9 +87,12 @@ def execute(request):
             if request.get('inputLayout') != 'disc-composite':
                 raise ValueError('Full Color consumes the active design composite, not a separate image.')
             source = sample_design_composite(request, directory)
+            save_json(config, request['configuration'])
             result = build_plan(source, config, spectra, directory,
                                 request.get('measurementsPath') or None, log=emit)
         else:
+            request['configuration']['imageLayout']='patch'
+            save_json(config, request['configuration'])
             result = calibration_plan(config, spectra, directory, log=emit)
         plan = json.loads(Path(result).read_text(encoding='utf-8'))
         plan['designSource'] = {'fingerprint': request['designFingerprint'],

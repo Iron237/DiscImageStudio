@@ -47,7 +47,7 @@
     <Resource Include="Assets\DiscImageStudio-256.png" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="..\DiscImageStudio.FullColor.Engine\**\*.py;..\DiscImageStudio.FullColor.Engine\**\*.json;..\DiscImageStudio.FullColor.Engine\requirements.txt" Exclude="..\DiscImageStudio.FullColor.Engine\tests\**">
+    <Content Include="..\DiscImageStudio.FullColor.Engine\**\*.py;..\DiscImageStudio.FullColor.Engine\**\*.json;..\DiscImageStudio.FullColor.Engine\requirements.txt;..\DiscImageStudio.FullColor.Engine\LICENSE;..\DiscImageStudio.FullColor.Engine\PROVENANCE.md" Exclude="..\DiscImageStudio.FullColor.Engine\tests\**">
       <Link>FullColorEngine\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

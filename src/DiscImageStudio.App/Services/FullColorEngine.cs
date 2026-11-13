@@ -25,56 +25,76 @@ internal sealed class FullColorEngine
         string root = request["workRoot"]!.GetValue<string>();
         Directory.CreateDirectory(root);
         string requestPath = Path.Combine(root, "request-" + Guid.NewGuid().ToString("N") + ".json");
-        File.WriteAllText(requestPath, request.ToJsonString(), new UTF8Encoding(false));
-        ProcessStartInfo start = new(pythonPath)
-        {
-            WorkingDirectory = EngineDirectory, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
-        };
-        start.ArgumentList.Add("-u");
-        start.ArgumentList.Add(worker);
-        start.ArgumentList.Add(requestPath);
-        start.Environment["PYTHONIOENCODING"] = "utf-8";
-        start.Environment["OPENBLAS_NUM_THREADS"] = "1";
-        StringBuilder errors = new();
-        Queue<string> lines = new();
-        using Process process = new() { StartInfo = start };
+        string colorPath = requestPath + ".color.png", binaryPath = requestPath + ".binary.png";
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            process.Start();
-            using CancellationTokenRegistration registration = cancellationToken.Register(() =>
+            if (request["operation"]?.GetValue<string>() == "preview")
             {
-                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                JsonNode t = request["configuration"]!["tone"]!;
+                ToneProfile tone = new(t["ditherStrength"]!.GetValue<double>(), ToneProfile.TwoLevels,
+                    t["brightness"]!.GetValue<double>(), t["srgbLinearization"]!.GetValue<bool>());
+                progress.Report(new("full-color", "generate", "DIS: design → white alpha → native tone/dither", null));
+                FullColorDesignPreprocessor.Prepare(request["inputPath"]!.GetValue<string>(),
+                    colorPath, binaryPath, tone, cancellationToken);
+                request["toneInputPath"] = colorPath;
+                request["nativeDitherPath"] = binaryPath;
+            }
+            File.WriteAllText(requestPath, request.ToJsonString(), new UTF8Encoding(false));
+            ProcessStartInfo start = new(pythonPath)
+            {
+                WorkingDirectory = EngineDirectory, UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
+            };
+            start.ArgumentList.Add("-u");
+            start.ArgumentList.Add(worker);
+            start.ArgumentList.Add(requestPath);
+            start.Environment["PYTHONIOENCODING"] = "utf-8";
+            start.Environment["OPENBLAS_NUM_THREADS"] = "1";
+            StringBuilder errors = new();
+            Queue<string> lines = new();
+            using Process process = new() { StartInfo = start };
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                process.Start();
+                using CancellationTokenRegistration registration = cancellationToken.Register(() =>
+                {
+                    try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                    catch (InvalidOperationException) { }
+                    catch (System.ComponentModel.Win32Exception) { }
+                });
+                Task<string> errorRead = process.StandardError.ReadToEndAsync();
+                while (process.StandardOutput.ReadLine() is { } line)
+                {
+                    using JsonDocument message = JsonDocument.Parse(line);
+                    string text = message.RootElement.GetProperty("message").GetString() ?? string.Empty;
+                    JsonElement fraction = message.RootElement.GetProperty("fraction");
+                    progress.Report(new("full-color", "generate", text,
+                        fraction.ValueKind == JsonValueKind.Number ? fraction.GetDouble() : null));
+                    lines.Enqueue(text);
+                    if (lines.Count > 80) lines.Dequeue();
+                }
+                process.WaitForExit();
+                errors.Append(errorRead.GetAwaiter().GetResult());
+                cancellationToken.ThrowIfCancellationRequested();
+                if (process.ExitCode != 0)
+                    throw new InvalidOperationException(string.Join(Environment.NewLine, lines) + Environment.NewLine + errors);
+                if (!File.Exists(expectedOutput)) throw new FileNotFoundException("The color engine did not produce its output.", expectedOutput);
+                return new(expectedOutput, string.Join(Environment.NewLine, lines));
+            }
+            finally
+            {
+                try { if (process.Id != 0 && !process.HasExited) process.Kill(entireProcessTree: true); }
                 catch (InvalidOperationException) { }
                 catch (System.ComponentModel.Win32Exception) { }
-            });
-            Task<string> errorRead = process.StandardError.ReadToEndAsync();
-            while (process.StandardOutput.ReadLine() is { } line)
-            {
-                using JsonDocument message = JsonDocument.Parse(line);
-                string text = message.RootElement.GetProperty("message").GetString() ?? string.Empty;
-                JsonElement fraction = message.RootElement.GetProperty("fraction");
-                progress.Report(new("full-color", "generate", text,
-                    fraction.ValueKind == JsonValueKind.Number ? fraction.GetDouble() : null));
-                lines.Enqueue(text);
-                if (lines.Count > 80) lines.Dequeue();
+                File.Delete(requestPath);
             }
-            process.WaitForExit();
-            errors.Append(errorRead.GetAwaiter().GetResult());
-            cancellationToken.ThrowIfCancellationRequested();
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException(string.Join(Environment.NewLine, lines) + Environment.NewLine + errors);
-            if (!File.Exists(expectedOutput)) throw new FileNotFoundException("The color engine did not produce its output.", expectedOutput);
-            return new(expectedOutput, string.Join(Environment.NewLine, lines));
         }
         finally
         {
-            try { if (process.Id != 0 && !process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-            catch (System.ComponentModel.Win32Exception) { }
-            File.Delete(requestPath);
+            File.Delete(colorPath);
+            File.Delete(binaryPath);
         }
     }
 }

@@ -6,6 +6,7 @@ from PIL import Image,ImageOps,ImageDraw
 from .core import Geometry
 from .colour import (load_spectra,Response,RGB_TO_XYZ,XYZ_TO_RGB,to_linear,to_srgb,
                      fit_weights,optical_signature,texture_digest,local_geometry)
+from .dis_dither import allocate
 
 
 def save_json(path,obj):
@@ -22,14 +23,24 @@ def load_config(path):
     ratio=macro/micro
     if abs(ratio-round(ratio))>1e-8 or not 2<=round(ratio)<=32:
         raise ValueError('macrocellMm must be 2..32 integer multiples of microcellMm.')
-    for d in (w,h):
-        if abs(d/macro-round(d/macro))>1e-8: raise ValueError('Patch width/height must be multiples of macrocellMm.')
+    if cfg.get('imageLayout')!='disc-annulus':
+        for d in (w,h):
+            if abs(d/macro-round(d/macro))>1e-8: raise ValueError('Patch width/height must be multiples of macrocellMm.')
     ri,ro=cfg['geometry']['innerRadiusMm'],cfg['geometry']['outerRadiusMm']
     closest_x=max(abs(cx)-w/2,0);closest_y=max(abs(cy)-h/2,0)
     if math.hypot(closest_x,closest_y)<ri or max(math.hypot(x,y)for x in (cx-w/2,cx+w/2)for y in (cy-h/2,cy+h/2))>ro:
         raise ValueError('The entire rectangular patch must lie inside the recordable annulus.')
     if not .01 <= micro <= .5: raise ValueError('microcellMm outside demo limits 0.01..0.5 mm.')
     return cfg
+
+
+def render_patch(cfg):
+    """Keep calibration ROI separate from the full-disc image coordinate grid."""
+    p=dict(cfg['patch'])
+    if cfg.get('imageLayout')=='disc-annulus':
+        side=math.ceil(2*cfg['geometry']['outerRadiusMm']/p['macrocellMm'])*p['macrocellMm']
+        p.update(centerMm=[0.,0.],widthMm=side,heightMm=side)
+    return p
 
 
 def check_output_dir(out):
@@ -53,7 +64,7 @@ def image_to_rgb(path):
             except Exception as ex: raise ValueError('Embedded ICC could not be converted; export an sRGB PNG first.')from ex
         elif src.mode not in ('RGB','RGBA','L','LA','P','1'):
             raise ValueError('Unsupported untagged image color space. Export an sRGB PNG/JPEG.')
-        rgba=src.convert('RGBA');bg=Image.new('RGBA',rgba.size,(0,0,0,255));bg.alpha_composite(rgba)
+        rgba=src.convert('RGBA');bg=Image.new('RGBA',rgba.size,(255,255,255,255));bg.alpha_composite(rgba)
         return bg.convert('RGB')
 
 
@@ -68,11 +79,20 @@ def build_plan(input_path,config_path,spectra_path,out,measurements=None,log=pri
     cfg=load_config(config_path);out=check_output_dir(out)
     textures,freq,spec=load_spectra(spectra_path)
     response=Response(cfg,textures,freq,spec,measurements)
-    p=cfg['patch'];w,h=p['widthMm'],p['heightMm'];cx,cy=p['centerMm'];macro=p['macrocellMm'];micro=p['microcellMm']
+    p=render_patch(cfg);w,h=p['widthMm'],p['heightMm'];cx,cy=p['centerMm'];macro=p['macrocellMm'];micro=p['microcellMm']
     nx,ny=round(w/macro),round(h/macro);sub=round(macro/micro)
     im=image_to_rgb(input_path)
     fitted=ImageOps.pad(im,(nx,ny),method=Image.Resampling.LANCZOS,color='black')
-    rgb=np.asarray(fitted)/255.; target=to_linear(rgb)@RGB_TO_XYZ.T*cfg['optics']['targetExposure']
+    rgb=np.asarray(fitted)/255.
+    # Native AdjustedGray applies gamma in linear density space when enabled.
+    # Do not linearize its output a second time.
+    linear=rgb if cfg.get('tone',{}).get('srgbLinearization',False) else to_linear(rgb)
+    target=linear@RGB_TO_XYZ.T*cfg['optics']['targetExposure']
+    xs=cx-w/2+(np.arange(nx)+.5)*macro;ys=cy+h/2-(np.arange(ny)+.5)*macro
+    radii=np.hypot(xs[None,:],ys[:,None])
+    valid=np.ones((ny,nx),bool)
+    if cfg.get('imageLayout')=='disc-annulus':
+        valid=(radii>=cfg['geometry']['innerRadiusMm'])&(radii<=cfg['geometry']['outerRadiusMm'])
     # Low-resolution grid describes MACRO pixels; texture ID grid is sub times finer.
     texture_grid=np.zeros((ny*sub,nx*sub),np.uint16)
     predicted=np.zeros((ny,nx,3));residual=np.zeros((ny,nx));mismatch=np.zeros((ny,nx));delta_grid=np.zeros((ny,nx))
@@ -81,13 +101,27 @@ def build_plan(input_path,config_path,spectra_path,out,measurements=None,log=pri
         y=cy+h/2-(iy+.5)*macro
         for ix in range(nx):
             x=cx-w/2+(ix+.5)*macro
+            if not valid[iy,ix]: continue
+            if not response.measured and not np.any(target[iy,ix]):
+                predicted[iy,ix]=cfg['optics']['backgroundLevel']*np.array([.95047,1.,1.08883])
+                residual[iy,ix]=np.linalg.norm(predicted[iy,ix])
+                delta_grid[iy,ix],mismatch[iy,ix]=local_geometry(x,y,cfg)
+                continue
             ids,xyz=response.at(x,y)
             chosen,weights,_=fit_weights(ids,xyz,target[iy,ix])
             # Stratified area allocation, spatially shuffled. It is not a color
             # PNG being re-quantized by DIS: these are actual Q-motif identifiers.
-            u=(np.arange(N)+rng.random())/N
-            selected=chosen[np.searchsorted(np.cumsum(weights),u,side='right').clip(max=len(chosen)-1)]
-            rng.shuffle(selected)
+            if 'tone' in cfg:
+                source=cfg['designRaster'];sw,sh=source['width'],source['height'];radius=source['radiusMm']
+                mx=cx-w/2+(ix*sub+np.arange(sub)+.5)*micro
+                my=cy+h/2-(iy*sub+np.arange(sub)+.5)*micro
+                px=np.clip(np.floor((mx+radius)*sw/(2*radius)).astype(np.int64),0,sw-1)
+                py=np.clip(np.floor((radius-my)*sh/(2*radius)).astype(np.int64),0,sh-1)
+                selected=allocate(chosen,weights,(py[:,None]*sw+px[None,:]).ravel(),cfg['tone']['ditherStrength'])
+            else:
+                u=(np.arange(N)+rng.random())/N
+                selected=chosen[np.searchsorted(np.cumsum(weights),u,side='right').clip(max=len(chosen)-1)]
+                rng.shuffle(selected)
             texture_grid[iy*sub:(iy+1)*sub,ix*sub:(ix+1)*sub]=selected.reshape(sub,sub)
             actual_weights=np.array([(selected==k).mean()for k in ids])
             pr=actual_weights@xyz
@@ -96,13 +130,16 @@ def build_plan(input_path,config_path,spectra_path,out,measurements=None,log=pri
             delta_grid[iy,ix],mismatch[iy,ix]=local_geometry(x,y,cfg)
         if iy%8==0 or iy+1==ny: log(f'Color solve: row {iy+1}/{ny}')
     display=to_srgb((predicted/cfg['optics']['targetExposure'])@XYZ_TO_RGB.T)
-    intended=Image.fromarray(np.round(rgb*255).astype(np.uint8))
+    intended=Image.fromarray(np.round((to_srgb(linear) if cfg.get('tone',{}).get('srgbLinearization',False) else rgb)*255).astype(np.uint8))
     modeled=Image.fromarray(np.round(display*255).astype(np.uint8))
+    alpha=Image.fromarray(np.uint8(valid)*255)
+    intended.putalpha(alpha);modeled.putalpha(alpha)
     intended.save(out/'target.png');modeled.save(out/'predicted.png')
     captioned_preview(modeled,'MODEL FIT - NOT A PHOTOGRAPH' if not response.measured else 'MEASURED RESPONSE FIT - NOT A PHOTOGRAPH',out/'preview.png')
     err=np.clip(residual/max(cfg['optics']['targetExposure'],1e-6),0,1)
     heat=np.stack([err,np.zeros_like(err),1-err],-1)
-    Image.fromarray(np.uint8(heat*255)).resize((800,round(800*ny/nx)),Image.Resampling.NEAREST).save(out/'gamut_error.png')
+    heat_image=Image.fromarray(np.uint8(heat*255));heat_image.putalpha(alpha)
+    heat_image.resize((800,round(800*ny/nx)),Image.Resampling.NEAREST).save(out/'gamut_error.png')
     # False-color texture ID map is diagnostic, never an optical prediction.
     false_rng=np.random.default_rng(7);colors=false_rng.integers(25,240,size=(len(textures),3),dtype=np.uint8);colors[0]=0
     Image.fromarray(colors[texture_grid]).save(out/'texture_ids_false_color.png')
@@ -113,8 +150,9 @@ def build_plan(input_path,config_path,spectra_path,out,measurements=None,log=pri
           'responseMode':'measured' if response.measured else 'unmeasured-17pp-1d-surrogate',
           'gridFile':'texture_ids.npy','gridSha256':gridhash,'inputSha256':hashlib.sha256(Path(input_path).read_bytes()).hexdigest(),
           'inputName':Path(input_path).name,'gridWidth':texture_grid.shape[1],'gridHeight':texture_grid.shape[0],
-          'metrics':{'meanXYZResidual':float(residual.mean()),'maximumXYZResidual':float(residual.max()),
-                     'deltaRange':[float(delta_grid.min()),float(delta_grid.max())],
+          'metrics':{'meanXYZResidual':float(residual[valid].mean()),'maximumXYZResidual':float(residual.max()),
+                     'activeMacrocellCount':int(valid.sum()),'coloredMacrocellCount':int(np.count_nonzero(np.any(linear>0,axis=2)&valid)),
+                     'deltaRange':[float(delta_grid[valid].min()),float(delta_grid[valid].max())],
                      'maxAbsRadialMismatch':float(np.abs(mismatch).max()),'textureCountUsed':int(np.unique(texture_grid).size)},
           'warnings':['Preview is not a photograph and cannot validate color.','2D/radial diffraction, drive DC and material response are not simulated.',
                       'This is a raw user-sector image without filesystem; keep files out of this optical experiment.']}

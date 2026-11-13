@@ -48,9 +48,10 @@ public partial class FullColorViewModel : ObservableObject
     {
         _shell = shell;
         Groups.Add(new("FullColor.Layout", [
-            new("patch.centerMm.0", "FullColor.CenterX", 0), new("patch.centerMm.1", "FullColor.CenterY", 43),
-            new("patch.widthMm", "FullColor.Width", 20), new("patch.heightMm", "FullColor.Height", 12),
             new("patch.macrocellMm", "FullColor.Macro", .25), new("patch.microcellMm", "FullColor.Micro", .05)]));
+        Groups.Add(new("FullColor.CalibrationRegion", [
+            new("patch.centerMm.0", "FullColor.CenterX", 0), new("patch.centerMm.1", "FullColor.CenterY", 43),
+            new("patch.widthMm", "FullColor.Width", 20), new("patch.heightMm", "FullColor.Height", 12)]));
         Groups.Add(new("FullColor.Light", [
             new("optics.lightPositionMm.0", "FullColor.X", 453.55736761107266),
             new("optics.lightPositionMm.1", "FullColor.Y", 43), new("optics.lightPositionMm.2", "FullColor.Z", 400)]));
@@ -86,7 +87,7 @@ public partial class FullColorViewModel : ObservableObject
                 {
                     _sourceProjectPath = _shell.ProjectFilePath;
                     _planPath = _planSignature = _isoPath = _isoSignature = null;
-                    Prediction = TargetPreview = ErrorPreview = InputPreview = null;
+                    Prediction = TargetPreview = ErrorPreview = InputPreview = NativeDitherPreview = TexturePreview = null;
                     UseForExport = false;
                     InvalidatePreview();
                 }
@@ -95,6 +96,14 @@ public partial class FullColorViewModel : ObservableObject
         };
         _shell.State.PropertyChanged += (_, e) =>
         {
+            if (e.PropertyName is nameof(DiscParametersState.ToneDitherStrength)
+                or nameof(DiscParametersState.ToneBrightness) or nameof(DiscParametersState.ToneLevels)
+                or nameof(DiscParametersState.ToneSrgbLinearization))
+            {
+                InvalidatePreview();
+                OnPropertyChanged(nameof(ToneSummary));
+            }
+            else if (e.PropertyName == nameof(DiscParametersState.ToneSummary)) OnPropertyChanged(nameof(ToneSummary));
             if (e.PropertyName?.StartsWith("Bd", StringComparison.Ordinal) == true && e.PropertyName != nameof(DiscParametersState.BdImagePath))
                 RefreshDesignSource();
         };
@@ -108,6 +117,7 @@ public partial class FullColorViewModel : ObservableObject
     public string SourceSummary => !IsBluRayProject ? L.T("FullColor.NeedProject")
         : !HasDesignSource ? L.T("请先在设计页导入图片。")
         : L.F($"设计页合成图源（{DiscImageStudio.Imaging.RingImageQuality.GenerationSize} px）") + " · " + _shell.CurrentProject!.Name;
+    public string ToneSummary => _shell.State.ToneSummary;
     public IAsyncRelayCommand BackHomeCommand => _shell.BackHomeCommand;
     public IRelayCommand<Workspace> NavigateCommand => _shell.NavigateCommand;
     public RelayCommand BrowseMeasurementsCommand { get; }
@@ -132,6 +142,8 @@ public partial class FullColorViewModel : ObservableObject
     [ObservableProperty] private BitmapSource? _targetPreview;
     [ObservableProperty] private BitmapSource? _prediction;
     [ObservableProperty] private BitmapSource? _errorPreview;
+    [ObservableProperty] private BitmapSource? _nativeDitherPreview;
+    [ObservableProperty] private BitmapSource? _texturePreview;
     [ObservableProperty] private string _resultSummary = L.T("FullColor.Empty");
     public string PreviewState => L.T(IsPreviewCurrent ? "FullColor.Current" : "FullColor.Stale");
 
@@ -198,6 +210,10 @@ public partial class FullColorViewModel : ObservableObject
         JsonObject geometry = cfg["geometry"]!.AsObject();
         geometry["totalSectors"] = disc.TotalSectors; geometry["usableSectors"] = disc.OutputSectors;
         geometry["innerRadiusMm"] = disc.InnerRadiusMm; geometry["outerRadiusMm"] = disc.OuterRadiusMm;
+        cfg["imageLayout"] = "disc-annulus";
+        var tone = _shell.State.BluRayTone;
+        cfg["tone"] = new JsonObject { ["ditherStrength"] = tone.DitherStrength,
+            ["brightness"] = tone.Brightness, ["srgbLinearization"] = tone.SrgbLinearization };
         return cfg;
     }
     private static JsonNode GetNode(JsonNode node, string path)
@@ -240,6 +256,7 @@ public partial class FullColorViewModel : ObservableObject
             Project = _shell.ProjectFilePath, Family = _shell.Design.Family,
             DataDirectory = _shell.State.BdDataDirectory,
             Radius = _shell.Design.CanvasOuterRadiusMm,
+            Pipeline = "dis-bd-color-v2", Tone = _shell.State.BluRayTone,
             Geometry = new[] { _shell.State.BdInnerRadius, _shell.State.BdOuterRadius, _shell.State.BdTotalSectors,
                 _shell.State.BdUsableSectors, _shell.State.BdPitchLinear, _shell.State.BdPitchQuadratic, _shell.State.BdPitchCubic },
             Layers = _shell.Design.CaptureLayers().Select(layer => new { Image = Stamp(layer.ImagePath), layer.Visible,
@@ -283,7 +300,7 @@ public partial class FullColorViewModel : ObservableObject
                 ["inputPath"] = composite, ["inputLayout"] = "disc-composite", ["designFingerprint"] = fingerprint,
                 ["canvasOuterRadiusMm"] = _shell.Design.CanvasOuterRadiusMm, ["measurementsPath"] = MeasurementsPath };
             InvalidatePreview();
-            Prediction = TargetPreview = ErrorPreview = null;
+            Prediction = TargetPreview = ErrorPreview = NativeDitherPreview = TexturePreview = null;
             bool success = await _shell.RunImageJobAsync(L.T(calibration ? "FullColor.Calibration" : "FullColor.Generate"), plan,
                 (progress, token) => _engine.Run(PythonPath, request, plan, progress, token), canPreviewOutput: false);
             if (success)
@@ -311,8 +328,12 @@ public partial class FullColorViewModel : ObservableObject
         TargetPreview = ReadBitmap(Path.Combine(directory, "target.png"));
         Prediction = ReadBitmap(Path.Combine(directory, _calibration ? "patch_key.png" : "predicted.png"));
         ErrorPreview = ReadBitmap(Path.Combine(directory, "gamut_error.png"));
+        NativeDitherPreview = ReadBitmap(Path.Combine(directory, "native-dither.png"));
+        TexturePreview = ReadBitmap(Path.Combine(directory, "texture_ids_false_color.png"));
         InputPreview = ReadBitmap(Path.Combine(directory, "design-composite.png"));
         ResultSummary = plan["responseMode"]!.GetValue<string>() + " · " + directory;
+        if (plan["metrics"] is JsonObject metrics && metrics["activeMacrocellCount"] is { } count)
+            ResultSummary = L.T("FullColor.FullDisc") + " · " + count.ToJsonString() + " · " + ResultSummary;
         _planSignature = Signature();
         IsPreviewCurrent = true;
         UseForExport = !_calibration;

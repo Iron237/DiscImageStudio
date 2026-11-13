@@ -150,9 +150,14 @@ class Response:
             # Single normalization across the whole ROI; never normalize each texture.
             patch=cfg['patch'];cx,cy=patch['centerMm'];w,h=patch['widthMm'],patch['heightMm']
             samples=[]
-            for xx in np.linspace(cx-w/2,cx+w/2,3):
-                for yy in np.linspace(cy-h/2,cy+h/2,3):
-                    delta,_=local_geometry(xx,yy,cfg);samples.append(self.raw_xyz(delta))
+            if cfg.get('imageLayout')=='disc-annulus':
+                points=[(rr*math.cos(a),rr*math.sin(a))
+                    for rr in np.linspace(cfg['geometry']['innerRadiusMm'],cfg['geometry']['outerRadiusMm'],3)
+                    for a in np.linspace(0,2*math.pi,32,endpoint=False)]
+            else:
+                points=[(xx,yy) for xx in np.linspace(cx-w/2,cx+w/2,3) for yy in np.linspace(cy-h/2,cy+h/2,3)]
+            for xx,yy in points:
+                delta,_=local_geometry(xx,yy,cfg);samples.append(self.raw_xyz(delta))
             self.scale=max(float(max(a[:,1].max() for a in samples)),1e-12)
 
     def raw_xyz(self,delta):

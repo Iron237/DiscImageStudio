@@ -10,7 +10,7 @@ import numpy as np
 from .core import (Geometry,MaskBank,payload_layout,SECTOR_BYTES,CLUSTER_BYTES,
                    CHANNEL_BITS_PER_RUB)
 from .colour import texture_digest,optical_signature
-from .pipeline import save_json
+from .pipeline import save_json,render_patch
 
 
 class Renderer:
@@ -25,15 +25,25 @@ class Renderer:
         self.grid=np.load(gridpath,allow_pickle=False)
         if self.grid.shape!=(self.plan['gridHeight'],self.plan['gridWidth']): raise ValueError('Texture grid shape mismatch.')
         if self.grid.dtype!=np.uint16 or self.grid.max()>=len(self.plan['textures']): raise ValueError('Invalid texture IDs.')
-        p=self.cfg['patch'];self.cx,self.cy=p['centerMm'];self.w,self.h=p['widthMm'],p['heightMm'];self.micro=p['microcellMm']
+        p=render_patch(self.cfg);self.cx,self.cy=p['centerMm'];self.w,self.h=p['widthMm'],p['heightMm'];self.micro=p['microcellMm']
         if abs(self.grid.shape[1]*self.micro-self.w)>1e-7 or abs(self.grid.shape[0]*self.micro-self.h)>1e-7: raise ValueError('Grid scale mismatch.')
         self.xmin,self.xmax=self.cx-self.w/2,self.cx+self.w/2
         self.ymin,self.ymax=self.cy-self.h/2,self.cy+self.h/2
-        self.center_angle=math.atan2(self.cy,self.cx)
+        active=np.nonzero(self.grid)
+        self.has_active=bool(len(active[0]))
+        # Cull against the written-dot bounds, while indexing against the original
+        # full-disc origin. A small design must not scan 25 GB of empty payloads.
+        if self.has_active:
+            ax0=self.xmin+int(active[1].min())*self.micro;ax1=self.xmin+(int(active[1].max())+1)*self.micro
+            ay0=self.ymax-(int(active[0].max())+1)*self.micro;ay1=self.ymax-int(active[0].min())*self.micro
+        else: ax0,ax1,ay0,ay1=self.xmin,self.xmax,self.ymin,self.ymax
+        acx,acy=(ax0+ax1)/2,(ay0+ay1)/2
+        self.center_angle=math.atan2(acy,acx)
         self.halfangle=max(abs(math.remainder(math.atan2(y,x)-self.center_angle,2*math.pi))
-            for x in (self.xmin,self.xmax)for y in (self.ymin,self.ymax))
-        self.rmin=math.hypot(max(abs(self.cx)-self.w/2,0),max(abs(self.cy)-self.h/2,0))
-        self.rmax=max(math.hypot(x,y)for x in (self.xmin,self.xmax)for y in (self.ymin,self.ymax))
+            for x in (ax0,ax1)for y in (ay0,ay1))
+        if ax0<=0<=ax1 and ay0<=0<=ay1: self.halfangle=math.pi
+        self.rmin=math.hypot(max(ax0,-ax1,0),max(ay0,-ay1,0))
+        self.rmax=max(math.hypot(x,y)for x in (ax0,ax1)for y in (ay0,ay1))
         self.offsets,self.ecc_index=payload_layout();self.order=np.argsort(self.offsets);self.sorted_offsets=self.offsets[self.order]
         self.motifs=[None if t['qHex'] is None else np.frombuffer(bytes.fromhex(t['qHex']),dtype=np.uint8)for t in self.plan['textures']]
         self.maskbank=None
@@ -44,6 +54,7 @@ class Renderer:
             if m is not None: self.motif_lut[k]=m[np.arange(self.motif_period)%len(m)]
 
     def candidates(self):
+        if not self.has_active: return np.empty(0,np.int64)
         clusters=self.geometry.n//32
         rs,aa=self.geometry.polar_at_bits(np.arange(clusters+1)*CHANNEL_BITS_PER_RUB)
         distance=np.abs(np.remainder((aa[:-1]+aa[1:])/2-self.center_angle+math.pi,2*math.pi)-math.pi)
@@ -97,15 +108,47 @@ class Renderer:
         return buf
 
 
-def _try_sparse(file):
-    if os.name!='nt': return
-    # Advisory only. Failing to mark sparse must not corrupt or shrink output.
-    try:
-        import ctypes,msvcrt
-        done=ctypes.c_ulong()
-        ctypes.windll.kernel32.DeviceIoControl(ctypes.c_void_p(msvcrt.get_osfhandle(file.fileno())),
-            0x900c4,None,0,None,0,ctypes.byref(done),None)
-    except Exception: pass
+def _initialize_output(file,length):
+    """Create the full logical zero range, without CRT zero-writing on Windows.
+
+    FSCTL_SET_ZERO_DATA guarantees zero reads and deallocates the sparse range.
+    Never use SetFileValidData: it can expose uninitialized data. Only fresh
+    outputs reach this function; resumed files are never reinitialized.
+    """
+    if os.name=='nt':
+        try:
+            import ctypes,msvcrt
+            from ctypes import wintypes
+            kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+            control=kernel.DeviceIoControl
+            control.argtypes=[wintypes.HANDLE,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,
+                              ctypes.c_void_p,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD),ctypes.c_void_p]
+            control.restype=wintypes.BOOL
+            seek=kernel.SetFilePointerEx
+            seek.argtypes=[wintypes.HANDLE,ctypes.c_longlong,ctypes.c_void_p,wintypes.DWORD]
+            seek.restype=wintypes.BOOL
+            eof=kernel.SetEndOfFile;eof.argtypes=[wintypes.HANDLE];eof.restype=wintypes.BOOL
+            handle=wintypes.HANDLE(msvcrt.get_osfhandle(file.fileno()))
+            returned=wintypes.DWORD()
+            if not control(handle,0x900c4,None,0,None,0,ctypes.byref(returned),None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if not seek(handle,length,None,0) or not eof(handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+            class ZeroRange(ctypes.Structure):
+                _fields_=[('start',ctypes.c_longlong),('end',ctypes.c_longlong)]
+            zeros=ZeroRange(0,length)
+            if not control(handle,0x980c8,ctypes.byref(zeros),ctypes.sizeof(zeros),
+                           None,0,ctypes.byref(returned),None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            file.seek(0)
+            return True
+        except (OSError,AttributeError):
+            # Restart from zero if native initialization partially succeeded.
+            # The conservative fallback still guarantees every unwritten byte.
+            file.seek(0);file.truncate(0)
+    file.truncate(length)
+    file.seek(0)
+    return False
 
 
 def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_cluster=None,resume=False,work_limit=None,log=print):
@@ -155,7 +198,7 @@ def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_
         save_json(tmp,state);tmp.replace(checkpoint)
     with open(partial,'r+b' if resume else 'xb') as f:
         if not resume:
-            _try_sparse(f);f.truncate(length);save_checkpoint(0,f)
+            _initialize_output(f,length);save_checkpoint(0,f)
         try:
             for k in range(begin,stop):
                 cluster=work[k];data=renderer.render_cluster(int(cluster))

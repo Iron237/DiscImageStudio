@@ -10,6 +10,12 @@ using System.Runtime.InteropServices.ComTypes;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
+if (args is ["--preview-fullcolor-project", var colorProject, var colorOutput])
+{
+    FullColorWorkflowTests.PreviewProject(colorProject, colorOutput);
+    return;
+}
+
 if (args is ["--test-fullcolor"])
 {
     FullColorWorkflowTests.Run();

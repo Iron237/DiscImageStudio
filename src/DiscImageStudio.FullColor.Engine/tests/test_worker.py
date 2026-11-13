@@ -2,16 +2,20 @@ import contextlib
 import copy
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import worker
-from bdcolor.writer import export, verify_export
+from bdcolor.writer import export, verify_export, _initialize_output, Renderer
+from bdcolor.dis_dither import phase, allocate
+from bdcolor.core import CHANNEL_BITS_PER_RUB
 
 
 class WorkflowTests(unittest.TestCase):
@@ -87,6 +91,77 @@ class WorkflowTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaises(ValueError):
                 worker.execute(request)
+
+    def test_06_full_length_zero_initialization_and_sparse_allocation(self):
+        path = self.root / 'fresh-output.bin'
+        length = 8 * 1024 * 1024 + 37
+        with path.open('xb') as stream:
+            sparse = _initialize_output(stream, length)
+        self.assertEqual(path.stat().st_size, length)
+        with path.open('rb') as stream:
+            for offset in (0, length // 2, length - 4096):
+                stream.seek(offset)
+                self.assertEqual(stream.read(4096), bytes(4096))
+        if os.name == 'nt' and sparse:
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            allocated = kernel.GetCompressedFileSizeW
+            allocated.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+            allocated.restype = wintypes.DWORD
+            high = wintypes.DWORD()
+            low = allocated(str(path), ctypes.byref(high))
+            self.assertLess((high.value << 32) | low, 1024 * 1024)
+        with path.open('r+b') as stream:
+            stream.seek(length // 2)
+            stream.write(b'PAYLOAD')
+        with path.open('rb') as stream:
+            stream.seek(length // 2 - 1)
+            self.assertEqual(stream.read(9), b'\0PAYLOAD\0')
+
+    def test_07_full_disc_keeps_lower_design_and_annulus_mask(self):
+        from PIL import ImageDraw
+        request = self.request('full-disc')
+        request['configuration']['imageLayout']='disc-annulus'
+        request['configuration']['patch'].update(macrocellMm=2.,microcellMm=.1)
+        request['configuration']['tone']={'ditherStrength':1.,'brightness':0.,'srgbLinearization':False}
+        image=Image.new('RGB',(464,464),'black')
+        # Bottom of disc, far outside the former (0,+43) 20x12 mm crop.
+        ImageDraw.Draw(image).rectangle((222,390,242,410),fill='red')
+        source=self.root/'lower-design.png';image.save(source);request['inputPath']=str(source)
+        with contextlib.redirect_stdout(io.StringIO()): plan=worker.execute(request)
+        data=json.loads(Path(plan).read_text(encoding='utf-8'))
+        self.assertGreater(data['metrics']['coloredMacrocellCount'],0)
+        with Image.open(Path(plan).parent/'target.png') as target:
+            pixels=np.asarray(target)
+            self.assertEqual(pixels[target.height//2,target.width//2,3],0)
+            self.assertEqual(pixels[0,0,3],0)
+            self.assertGreater(pixels[50,29,0],100)
+        renderer=Renderer(plan)
+        self.assertLess(len(renderer.candidates()),renderer.geometry.n//32//4)
+        # Compare angular culling with brute-force nominal positions on actual
+        # clusters. Export must not omit any written dots in the bottom design.
+        for cluster in renderer.candidates()[::max(1,len(renderer.candidates())//5)]:
+            x,y=renderer.geometry.xy_at_bits(int(cluster)*CHANNEL_BITS_PER_RUB+renderer.offsets)
+            ix=np.floor((x-renderer.xmin)/renderer.micro).astype(int).clip(0,renderer.grid.shape[1]-1)
+            iy=np.floor((renderer.ymax-y)/renderer.micro).astype(int).clip(0,renderer.grid.shape[0]-1)
+            expected=np.flatnonzero(renderer.grid[iy,ix]!=0)
+            indices,ids=renderer.patch_payload_indices(int(cluster))
+            np.testing.assert_array_equal(np.sort(indices[ids!=0]),expected)
+
+    def test_08_native_dither_vectors_and_density(self):
+        indices=[0,1,2,255,65536,2147483647,4294967301,-1]
+        expected=[0,1834104592,2889141741,3967754812,3153350005,4259742747,1557653252,2175737881]
+        np.testing.assert_array_equal(phase(indices)*4294967296.,expected)
+        samples=np.arange(100000,dtype=np.int64)
+        selected=allocate(np.array([0,9,42]),np.array([.2,.3,.5]),samples,1.)
+        np.testing.assert_allclose([(selected==i).mean() for i in (0,9,42)],[.2,.3,.5],atol=.005)
+        np.testing.assert_array_equal(allocate(np.array([0,9]),np.array([.25,.75]),samples,0.),9)
+        for gray in (0,64,128,255):
+            for strength in (0.,.75,1.):
+                actual=allocate(np.array([0,1]),np.array([1-gray/255.,gray/255.]),samples,strength)
+                native=gray >= 128 + strength*255*(phase(samples)-.5)
+                np.testing.assert_array_equal(actual,native.astype(int))
 
 
 if __name__ == '__main__':

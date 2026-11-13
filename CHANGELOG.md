@@ -4,6 +4,7 @@
 
 ### 中文
 
+- 修复全彩预览只取盘面上方小窗口导致黑图的问题：默认转换完整记录环，继承原生白底、亮度、sRGB 和抖动强度；模型纹理点阵使用 DIS 的确定性抖动相位。增加原生 BD 黑白与实际纹理点阵对照。Windows 完整镜像使用原生稀疏清零，避免预分配写零阻塞。
 - 本 fork 新增原生「全彩」工作流：64099 图片与模型预览、绘图/光路参数编辑、方案保存、64 纹理标定及完整 ISO 输出；任务复用 DIS 的进度与取消。数值后端使用独立 Python 环境。实盘全彩仍未验证。
 
 - Windows 应用宿主设置 `CetCompat=false`，作为 #229 所报启动失败的兼容性处理；这会降低该应用进程的硬件影子栈保护，不修改系统级安全设置。受影响原机上的启动结果仍待验证。
@@ -15,6 +16,7 @@
 
 ### English
 
+- Fix black Full Color previews caused by the former upper-disc crop. Convert the complete annulus, inherit native white alpha/tone settings, and allocate model textures with DIS dither phases. Add native monochrome and texture-dot references. Initialize Windows full images through sparse zero ranges instead of blocking CRT zero writes.
 - This fork adds a native Full Color workflow for 64099 BD-R: image/model previews, patch and optical parameter editing, saved recipes, 64-texture calibration and full ISO export, using the DIS job progress and cancellation surface. The numerical backend uses an isolated Python runtime. Physical full color remains unverified.
 
 - Set `CetCompat=false` on the Windows application host as a compatibility workaround for the startup failure reported in #229. This reduces hardware shadow-stack protection for this application process without changing system-wide security settings. Startup on the affected original machine still needs verification.

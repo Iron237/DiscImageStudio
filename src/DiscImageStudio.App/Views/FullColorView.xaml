@@ -34,6 +34,7 @@
                             </controls:SourceChip>
                             <Image Source="{Binding InputPreview}" Height="150" Stretch="Uniform" Margin="0,10,0,0" />
                             <TextBlock Text="{loc:Text FullColor.DesignInputHint}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                            <TextBlock Text="{Binding ToneSummary}" Style="{StaticResource CompactHint}" Margin="0,6,0,0" />
                             <WrapPanel Margin="0,12,0,0">
                                 <Button Content="{loc:Text FullColor.Generate}" Command="{Binding PreviewCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" />
                                 <Button Content="{loc:Text FullColor.Calibration}" Command="{Binding CalibrationCommand}" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" />
@@ -63,6 +64,10 @@
                                         <Image Source="{Binding InputPreview}" Height="180" Stretch="Uniform" /></StackPanel>
                                     <StackPanel Margin="6"><TextBlock Text="{loc:Text FullColor.Residual}" Style="{StaticResource FieldLabel}" />
                                         <Image Source="{Binding ErrorPreview}" Height="180" Stretch="Uniform" /></StackPanel>
+                                    <StackPanel Margin="6"><TextBlock Text="{loc:Text FullColor.NativeDither}" Style="{StaticResource FieldLabel}" TextWrapping="Wrap" />
+                                        <Image Source="{Binding NativeDitherPreview}" Height="180" Stretch="Uniform" /></StackPanel>
+                                    <StackPanel Margin="6"><TextBlock Text="{loc:Text FullColor.TextureDots}" Style="{StaticResource FieldLabel}" TextWrapping="Wrap" />
+                                        <Image Source="{Binding TexturePreview}" Height="180" Stretch="Uniform" /></StackPanel>
                                 </UniformGrid>
                             </Expander>
                         </StackPanel>
