@@ -361,5 +361,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(json.loads(target.read_text()),{'new':True})
 
 
+    def test_20_reusing_an_iso_rejects_fragments_and_partials(self):
+        with contextlib.redirect_stdout(io.StringIO()):plan=worker.execute(self.request('existing-iso'))
+        fragment=self.root/'existing-fragment.bin'
+        export(plan,fragment,allow_unmeasured=True,fragment_clusters=32,start_cluster=0,workers=1,log=lambda _:None)
+        output=fragment.with_suffix('.iso');fragment.rename(output)
+        Path(str(fragment)+'.json').rename(str(output)+'.json')
+        request={'operation':'verify-iso','directory':str(self.root),'planPath':plan,'outputPath':str(output)}
+        original=output.read_bytes()
+        with patch('worker.export',side_effect=AssertionError('Verification must not re-export')):
+            with self.assertRaisesRegex(ValueError,'complete Full Color ISO'):
+                worker.execute(request)
+            request['outputPath']=str(output)+'.partial'
+            with self.assertRaisesRegex(ValueError,'never a partial'):
+                worker.execute(request)
+        self.assertEqual(output.read_bytes(),original)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -78,7 +78,10 @@
                                 <controls:PathField Label="{loc:Text FullColor.WorkDirectory}" Text="{Binding OutputRoot}" ButtonLabel="{loc:Text Xaml.Select}" Command="{Binding BrowseOutputCommand}" />
                                 <CheckBox Content="{loc:Text FullColor.Accept}" IsChecked="{Binding AllowUnmeasured}" Margin="0,12,0,12" />
                             </StackPanel>
-                            <Button Content="{loc:Text FullColor.Export}" Command="{Binding ExportCommand}" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" />
+                            <WrapPanel>
+                                <Button Content="{loc:Text FullColor.Export}" Command="{Binding ExportCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,0" />
+                                <Button Content="{loc:Text FullColor.UseExistingIso}" Command="{Binding UseExistingIsoCommand}" Style="{StaticResource CompactButton}" VerticalAlignment="Center" />
+                            </WrapPanel>
                             <CheckBox Content="{loc:Text FullColor.UseForExport}" IsChecked="{Binding UseForExport}" IsEnabled="{Binding CanEdit}" Margin="0,12,0,0" />
                             <TextBlock Text="{loc:Text FullColor.OutputHint}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0" />
                             <TextBlock Text="{Binding ResultSummary}" Style="{StaticResource CompactHint}" TextWrapping="Wrap" Margin="0,8,0,0" />

@@ -4,6 +4,10 @@
 
 ## 本地验证
 
+2026-11-13，本 fork 的刻录竞争修复：用户报告 DIS 1.5 已流式刻录 BD 2233 成功；开发版全彩镜像的首次 WRITE(10) 在 LBA 0、32 扇区处等待 200 秒后返回 `0xC0AA020D`，无有效 Sense，源流读取耗时 0.002 秒且预缓冲充足。版本对比发现新增侧栏轮询与刻录使用各自的锁，取消令牌不能终止已发出的同步 MMC 调用。真实 STA 线程的离线测试在旧代码复现两个设备任务重叠，统一原生任务调度后通过，同时验证取消期间保留任务所有权、异常后释放；七组 BD 写入/查询/清理测试通过。未重试实体写入，该竞争是否解释本次设备超时仍需实盘复测。
+
+全彩已有镜像复用：20 项 Python 回归及原生全彩工作流通过，包含完整尺寸 ISO 的同名覆盖、错计划拒绝并清除旧刻录资格、正确镜像校验后重新绑定，以及改名片段和 `.partial` 拒绝。用户现有 `fullcolor-64099.iso` 只读复核长度与五个采样簇通过；检查没有改写镜像或执行刻录，不等同于全盘哈希校验或物理读回。
+
 2026-11-09，应用内更新：Windows 便携单文件 EXE 的关于页新增「检查更新」，读取上游 `releases/latest/download/latest.json`，按处理器架构选择 EXE，校验长度与 SHA-256 后由临时 PowerShell 辅助进程在应用退出后替换并重启；替换失败或新版本在启动后 20 秒内未写入健康标记时恢复旧 EXE，脚本未发出启动信号时应用保持打开。Release solution 构建零警告、零错误，完整 ArchitectureTests 通过，新增检查覆盖 SemVer 解析与排序、清单版本／标签／URL／哈希／大小拒绝、缺失架构资产、辅助脚本语法、启动信号、等待期间不替换文件；发布工具 59 项测试通过，覆盖 `latest.json` 的版本、标签、URL、哈希、字节数和 LF 输出。辅助脚本另在临时目录用 `cmd.exe` 替身完成真实替换、重启、备份与标记清理，并用启动即退出的替身验证回滚和错误日志。关于页在 zh-CN、cs、en、es、tr 下离屏检查，按钮位于 GitHub 左侧且无溢出。未执行公开 Release 的真实更新检查（`releases/latest` 在发布前不存在），未验证 ARM64 实机和商店版；更新包未签名，发布后需按[发布指南](RELEASING.md)用上一正式版复验。
 
 English: the About page of the portable Windows EXE now checks the upstream `latest.json`, selects the architecture asset, verifies its length and SHA-256, and replaces the running EXE through a temporary PowerShell helper after exit. A failed replacement, or a new build that does not write its health marker within 20 seconds of starting, restores the old EXE; a missing helper readiness signal keeps the app open. The Release solution build completed with zero warnings/errors and the complete architecture suite passed, including SemVer ordering, manifest validation and rejection, helper syntax, readiness, and no replacement before exit. All 59 release-tooling tests passed. The helper was exercised end to end with `cmd.exe` stand-ins for replacement/restart and for startup-failure rollback. About-page snapshots in zh-CN, cs, en, es and tr were inspected. A live check against a public release, ARM64 hardware and the Store package were not tested; the packages remain unsigned, so post-publication verification with the previous stable EXE is required.

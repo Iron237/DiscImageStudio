@@ -72,6 +72,7 @@ public partial class FullColorViewModel : ObservableObject
         PreviewCommand = new AsyncRelayCommand(() => PreviewAsync(false), () => CanEdit && HasDesignSource);
         CalibrationCommand = new AsyncRelayCommand(() => PreviewAsync(true), () => CanEdit && IsBluRayProject);
         ExportCommand = new AsyncRelayCommand(ExportAsync, () => CanEdit && IsPreviewCurrent && _planPath is not null && IsBluRayProject);
+        UseExistingIsoCommand = new AsyncRelayCommand(PickExistingIsoAsync, () => CanEdit && IsPreviewCurrent && !_calibration && IsBluRayProject);
         SaveRecipeCommand = new RelayCommand(SaveRecipe, () => CanEdit);
         LoadRecipeCommand = new RelayCommand(LoadRecipe, () => CanEdit);
         OpenPlanCommand = new RelayCommand(OpenPlan, () => CanEdit);
@@ -131,6 +132,7 @@ public partial class FullColorViewModel : ObservableObject
     public IAsyncRelayCommand PreviewCommand { get; }
     public IAsyncRelayCommand CalibrationCommand { get; }
     public IAsyncRelayCommand ExportCommand { get; }
+    public IAsyncRelayCommand UseExistingIsoCommand { get; }
 
     [ObservableProperty] private string _measurementsPath = string.Empty;
     [ObservableProperty] private string _pythonPath = FullColorEngine.DefaultPythonPath;
@@ -151,6 +153,7 @@ public partial class FullColorViewModel : ObservableObject
     partial void OnIsPreviewCurrentChanged(bool value)
     {
         ExportCommand?.NotifyCanExecuteChanged();
+        UseExistingIsoCommand?.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(PreviewState));
     }
     private void InvalidatePreview()
@@ -182,7 +185,7 @@ public partial class FullColorViewModel : ObservableObject
         OnPropertyChanged(nameof(CanEdit));
         foreach (IRelayCommand command in new IRelayCommand[] { BrowseMeasurementsCommand,
             ClearMeasurementsCommand, BrowsePythonCommand, BrowseOutputCommand, SaveRecipeCommand, LoadRecipeCommand,
-            OpenPlanCommand, ResetCommand, PreviewCommand, CalibrationCommand, ExportCommand }) command.NotifyCanExecuteChanged();
+            OpenPlanCommand, ResetCommand, PreviewCommand, CalibrationCommand, ExportCommand, UseExistingIsoCommand }) command.NotifyCanExecuteChanged();
     }
 
     private void PickMeasurements() { if (_shell.Dialogs?.PickOpen(L.T("FullColor.Measurements"), "JSON|*.json") is { } p) MeasurementsPath = p; }
@@ -377,6 +380,39 @@ public partial class FullColorViewModel : ObservableObject
                 (progress, token) => _engine.Run(PythonPath, request, output, progress, token), canPreviewOutput: false);
             if (success && !_calibration) { _isoPath = output; _isoSignature = Signature(); }
             return success;
+    }
+
+    private async Task PickExistingIsoAsync()
+    {
+        try
+        {
+            if (_shell.Dialogs?.PickOpen(L.T("FullColor.UseExistingIso"), "BD-R ISO|*.iso") is { } path)
+                await UseExistingIsoAsync(path);
+        }
+        catch (Exception e) { ShowError(e); }
+    }
+
+    internal async Task<bool> UseExistingIsoAsync(string path)
+    {
+        _isoPath = _isoSignature = null;
+        RequireProjectGeometry();
+        if (!IsPreviewCurrent || _calibration || _planPath is null || _planSignature != Signature())
+            throw new InvalidOperationException(L.T("FullColor.ExportStale"));
+        string image = Path.GetFullPath(path);
+        string signature = Signature();
+        JsonObject request = new() { ["operation"] = "verify-iso", ["directory"] = Path.GetDirectoryName(_planPath),
+            ["workRoot"] = Path.GetFullPath(OutputRoot), ["planPath"] = _planPath, ["outputPath"] = image };
+        bool success = await _shell.RunImageJobAsync(L.T("FullColor.VerifyIso"), image,
+            (progress, token) => _engine.Run(PythonPath, request, image, progress, token), canPreviewOutput: false);
+        if (success && signature == Signature())
+        {
+            _isoPath = image;
+            _isoSignature = signature;
+            UseForExport = true;
+            ResultSummary = L.T("FullColor.VerifiedIso") + " · " + image;
+            return true;
+        }
+        return false;
     }
 
     internal string RequireCurrentIso()

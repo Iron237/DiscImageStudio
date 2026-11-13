@@ -4,6 +4,12 @@ namespace DiscImageStudio.Burning;
 
 internal static class ImapiCom
 {
+    // Sidebar probes and the burner have separate caller-level gates. A probe
+    // already inside a synchronous MMC call cannot be stopped by cancelling its
+    // token. Keep native ownership until the entire STA task has returned, so a
+    // pending read can never overlap WRITE or recorder initialization in-process.
+    private static readonly OpticalBurnOperationGate DeviceOperations = new();
+
     internal static dynamic CreateRecorder(string id)
     {
         dynamic recorder = CreateComObject("IMAPI2.MsftDiscRecorder2");
@@ -49,6 +55,9 @@ internal static class ImapiCom
     }
 
     internal static Task<T> RunOnStaThread<T>(Func<T> action)
+        => DeviceOperations.RunAsync(() => StartStaThread(action), CancellationToken.None);
+
+    private static Task<T> StartStaThread<T>(Func<T> action)
     {
         TaskCompletionSource<T> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         Thread thread = new(() =>

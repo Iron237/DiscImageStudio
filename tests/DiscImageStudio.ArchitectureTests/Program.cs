@@ -22,6 +22,18 @@ if (args is ["--test-fullcolor"])
     return;
 }
 
+if (args is ["--test-bluray-burn"])
+{
+    ImapiDeviceSchedulingTests.Run();
+    OpticalBurnOperationGateTests.Run();
+    OpticalDriveProbeTests.Run();
+    BluRaySequentialBurnTests.Run();
+    BluRaySequentialWriterTests.Run();
+    BluRaySessionCleanupTests.Run();
+    BluRayFlushDiagnosticsTests.Run();
+    return;
+}
+
 if (args is ["--test-image-drop"])
 {
     ImageDropTests.Run();
@@ -183,6 +195,7 @@ CdProgressTelemetryTests.Run();
 BurnStreamDiagnosticsTests.Run();
 BurnProgressDisplayTests.Run();
 OpticalBurnOperationGateTests.Run();
+ImapiDeviceSchedulingTests.Run();
 MediaSectorCountTests.Run();
 OpticalDriveProbeTests.Run();
 BluRaySequentialBurnTests.Run();

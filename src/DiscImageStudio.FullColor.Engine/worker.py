@@ -24,7 +24,7 @@ for _library_variable in ('OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THRE
 os.environ['OPENBLAS_MAIN_FREE']='1'
 from bdcolor.colour import build_spectra
 from bdcolor.pipeline import build_plan, calibration_plan, save_json, image_to_rgb, render_patch
-from bdcolor.writer import export
+from bdcolor.writer import export, verify_export
 from PIL import Image, ImageOps
 
 
@@ -113,6 +113,18 @@ def execute(request):
                         allow_unmeasured=bool(request.get('allowUnmeasured')),
                         resume=bool(request.get('resume')), log=emit, workers=request.get('workers'),
                         overwrite=bool(request.get('overwrite')))
+    elif operation == 'verify-iso':
+        result = Path(request['outputPath'])
+        if result.suffix.lower() != '.iso':
+            raise ValueError('Select a completed .iso, never a partial image or fragment.')
+        metadata = json.loads(Path(str(result)+'.json').read_text(encoding='utf-8'))
+        if (metadata.get('format') != 'bdcolor-raw-user-sectors-v1'
+            or metadata.get('burnableContainer') is not True
+            or metadata.get('startCluster') != 0
+            or metadata.get('logicalSizeBytes') != 25025314816
+            or not metadata.get('sampleClusterSha256')):
+            raise ValueError('A complete Full Color ISO and its export metadata are required.')
+        verify_export(request['planPath'], result, log=emit)
     else:
         raise ValueError('Unsupported full-color operation: ' + operation)
     emit('Completed: ' + str(result), 1.0)

@@ -4,6 +4,8 @@
 
 ### 中文
 
+- 修复光驱信息轮询与刻录可能重叠的竞态：所有 IMAPI 原生 STA 任务共用进程内调度锁，取消轮询后仍等待已发出的设备命令返回，再开始刻录。离线测试复现并验证竞争已消除；LBA 0 写入超时的实盘结果仍待复测。
+- 全彩页增加「使用已有 ISO」：按当前计划、完整容量和采样簇校验已有镜像，重启后可重新用于刻录，无需再次导出。错计划、未完成文件和诊断片段不会恢复刻录资格。
 - 修复同名全彩导出的文件提交：确认覆盖后保留旧 ISO 直至新镜像生成并抽样校验完成；检查点使用唯一临时文件和 Windows 占用重试，加入单写入锁与可恢复的最终发布，避免替换失败后丢失续算能力。
 - 全彩加入 CPU 自适应并行：颜色求解按行多进程计算，ISO 导出探测至全部可用逻辑线程后按吞吐选择并行度；保留点阵/镜像字节一致性、有界内存、取消和旧断点续算。开发目录可继续直接运行。
 - 修复全彩预览只取盘面上方小窗口导致黑图的问题：默认转换完整记录环，继承原生白底、亮度、sRGB 和抖动强度；模型纹理点阵使用 DIS 的确定性抖动相位。增加原生 BD 黑白与实际纹理点阵对照。Windows 完整镜像使用原生稀疏清零，避免预分配写零阻塞。
@@ -18,6 +20,8 @@
 
 ### English
 
+- Serialize sidebar probes and burns across native IMAPI STA tasks. Cancelling a probe now retains native ownership until an in-flight device call returns. Offline tests reproduce and eliminate the overlap; the reported first-WRITE timeout still needs a physical retest.
+- Add Use existing ISO to Full Color: verify a completed image against the current plan, capacity and sampled clusters before reusing it after restart, without another export. Reject mismatched plans, partials and diagnostic fragments.
 - Fix same-name Full Color commits: retain an existing ISO until its confirmed replacement is complete and sample-verified. Use unique checkpoint temporaries, Windows sharing retries, a single output owner and recoverable final publication.
 - Add adaptive CPU parallelism to Full Color: solve color rows in separate processes and probe ISO rendering up to all available logical CPUs before choosing throughput. Preserve deterministic grids/bytes, bounded buffering, cancellation and existing export checkpoints. Development-folder execution remains supported.
 - Fix black Full Color previews caused by the former upper-disc crop. Convert the complete annulus, inherit native white alpha/tone settings, and allocate model textures with DIS dither phases. Add native monochrome and texture-dot references. Initialize Windows full images through sparse zero ranges instead of blocking CRT zero writes.

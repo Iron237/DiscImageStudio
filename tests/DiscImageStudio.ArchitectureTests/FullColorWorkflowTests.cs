@@ -179,6 +179,26 @@ internal static class FullColorWorkflowTests
                 string newIdentity = JsonNode.Parse(File.ReadAllText(shell.State.BdOutputPath + ".json"))!["_publicationIdentity"]!.ToJsonString();
                 Require(oldIdentity != newIdentity, "confirmed overwrite commits a new file instead of retaining stale output");
                 shell.ConfirmHandler = null;
+                string metadataPath = shell.State.BdOutputPath + ".json";
+                string originalMetadata = File.ReadAllText(metadataPath);
+                JsonNode mismatch = JsonNode.Parse(originalMetadata)!;
+                mismatch["planSha256"] = "another-plan";
+                try
+                {
+                    File.WriteAllText(metadataPath, mismatch.ToJsonString());
+                    Task<bool> rejectedIso = vm.UseExistingIsoAsync(shell.State.BdOutputPath);
+                    Pump(rejectedIso);
+                    Require(!rejectedIso.Result, "an existing ISO from another plan cannot be attached to this design");
+                    bool unavailable = false;
+                    try { vm.RequireCurrentIso(); } catch (InvalidOperationException) { unavailable = true; }
+                    Require(unavailable, "failed existing-ISO verification clears any earlier burn eligibility");
+                }
+                finally { File.WriteAllText(metadataPath, originalMetadata); }
+                Task<bool> existingIso = vm.UseExistingIsoAsync(shell.State.BdOutputPath);
+                Pump(existingIso);
+                Require(existingIso.Result && vm.RequireCurrentIso() == shell.State.BdOutputPath
+                    && File.ReadAllText(metadataPath) == originalMetadata,
+                    "a matching completed ISO can be verified and reused without re-exporting or changing metadata");
                 }
                 shell.Design.Layers[0].TranslateXMm += 2;
                 Require(!vm.IsPreviewCurrent && !vm.ExportCommand.CanExecute(null), "moving a design layer invalidates the generated result");
