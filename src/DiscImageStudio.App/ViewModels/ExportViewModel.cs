@@ -24,6 +24,7 @@ public partial class ExportViewModel : ObservableObject
 
     /// <summary>Exposed for the view's two-way bindings to the shared parameters.</summary>
     public DiscParametersState State => _state;
+    public FullColorViewModel FullColor => _shell.FullColor;
 
     public ExportViewModel(ShellViewModel shell, DiscParametersState state, DesignViewModel design)
     {
@@ -48,6 +49,10 @@ public partial class ExportViewModel : ObservableObject
             }
         };
         _design.DesignEdited += UpdateSourceSummary;
+        _shell.FullColor.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(FullColorViewModel.UseForExport) or nameof(FullColorViewModel.IsPreviewCurrent)) UpdateSourceSummary();
+        };
         _design.CanvasChanged += UpdateSourceSummary;
         _state.PropertyChanged += (_, args) =>
         {
@@ -181,7 +186,9 @@ public partial class ExportViewModel : ObservableObject
         }
 
         int layerCount = _design.Layers.Count;
-        SourceSummary = layerCount == 0
+        SourceSummary = IsBluRay && FullColor.UseForExport
+            ? L.T("FullColor.Title") + " · " + FullColor.PreviewState
+            : layerCount == 0
             ? L.T("请先在设计页导入图片。")
             : L.F($"设计页合成图源（{RingImageQuality.GenerationSize} px）");
         OnPropertyChanged(nameof(HasLayers));
@@ -191,6 +198,11 @@ public partial class ExportViewModel : ObservableObject
     {
         try
         {
+            if (IsBluRay && FullColor.UseForExport)
+            {
+                await FullColor.ExportToAsync(_state.BdOutputPath);
+                return;
+            }
             // The composite renders here at export quality even when the design page has not
             // been visited in this session, so a reopened project can generate immediately.
             string compositePath = await _design.EnsureExportCompositeAsync();

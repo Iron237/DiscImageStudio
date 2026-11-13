@@ -28,11 +28,11 @@ internal static class UnifiedCommandRunner
                 ReadOnlySpan<string> snapshotArguments = arguments.AsSpan(1);
                 string? tabValue = FindOption(snapshotArguments, "tab");
                 int workspaceIndex = tabValue is null ? 0 : int.Parse(tabValue);
-                if (workspaceIndex < 0 || workspaceIndex > (int)Workspace.CalibrationBurn)
+                if (workspaceIndex < 0 || workspaceIndex > (int)Workspace.FullColor)
                 {
                     throw new ArgumentOutOfRangeException(
                         nameof(arguments),
-                        "Tabs: 0 home, 1 design, 2 preview, 3 export, 4 burn, 5 calibration, 6 calibration burn.");
+                        "Tabs: 0 home, 1 design, 2 preview, 3 export, 4 burn, 5 calibration, 6 calibration burn, 7 full color.");
                 }
 
                 bool settingsDialog = HasOption(snapshotArguments, "settings-dialog");

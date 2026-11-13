@@ -1,0 +1,61 @@
+name: Full Color workflow
+
+on:
+  push:
+    branches: [feat/full-color-workflow]
+  pull_request:
+    paths:
+      - 'src/DiscImageStudio.App/**'
+      - 'src/DiscImageStudio.FullColor.Engine/**'
+      - 'tests/DiscImageStudio.ArchitectureTests/**'
+      - '.github/workflows/fullcolor.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fullcolor:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build and test the design-to-color workflow
+        shell: pwsh
+        run: |
+          python -m pip install -r src/DiscImageStudio.FullColor.Engine/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s src/DiscImageStudio.FullColor.Engine/tests -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build DiscImageStudio.slnx -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project src/DvdImageSolver -c Release --no-build -- selftest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:DIS_TEST_FULLCOLOR_PYTHON = (Get-Command python).Source
+          if ((Get-PSDrive -Name C).Free -gt 26GB) { $env:DIS_TEST_FULLCOLOR_FULL_ISO = '1' }
+          else { Write-Output 'Full-size ISO test needs 26 GB free; testing native preview and encoded fragments on this runner.' }
+          dotnet run --project tests/DiscImageStudio.ArchitectureTests -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish the Windows app with its color engine
+        shell: pwsh
+        run: |
+          dotnet publish src/DiscImageStudio.App/DiscImageStudio.App.csproj -c Release -r win-x64 --self-contained true -o artifacts/fullcolor
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path artifacts/fullcolor/FullColorEngine/worker.py)) { throw 'Color engine missing from package' }
+          if (-not (Test-Path artifacts/fullcolor/FullColorEngine/configs/verbatim_64099.json)) { throw 'Color configuration missing from package' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DiscImageStudio-FullColor-win-x64
+          path: artifacts/fullcolor/
+          retention-days: 14

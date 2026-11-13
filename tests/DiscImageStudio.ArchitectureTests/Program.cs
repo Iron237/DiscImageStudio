@@ -10,6 +10,12 @@ using System.Runtime.InteropServices.ComTypes;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
+if (args is ["--test-fullcolor"])
+{
+    FullColorWorkflowTests.Run();
+    return;
+}
+
 if (args is ["--test-image-drop"])
 {
     ImageDropTests.Run();
@@ -141,6 +147,7 @@ Throws<ArgumentException>(
     "duplicate command rejection");
 Throws<ArgumentException>(() => catalog.Resolve("unknown-command"), "unknown command rejection");
 MaximizedWindowBoundsTests.Run();
+FullColorWorkflowTests.Run();
 WindowWorkAreaNativeTests.Run();
 BluRayModuleTests.Run();
 BluRayEncodingTests.Run();

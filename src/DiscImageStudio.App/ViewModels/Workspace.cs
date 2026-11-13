@@ -11,4 +11,5 @@ public enum Workspace
     Burn,
     Calibration,
     CalibrationBurn,
+    FullColor,
 }

@@ -134,6 +134,11 @@ public partial class BurnViewModel : ObservableObject
                 _shell.RefreshCancelJobState();
             }
         };
+        _shell.FullColor.PropertyChanged += (_, args) =>
+        {
+            if (!UseCalibrationPattern && args.PropertyName is (nameof(FullColorViewModel.UseForExport)
+                or nameof(FullColorViewModel.IsPreviewCurrent))) UpdateSourceSummary();
+        };
     }
 
     public RelayCommand RefreshDevicesCommand { get; }
@@ -270,6 +275,12 @@ public partial class BurnViewModel : ObservableObject
                     + L.T("按标定图案记录的盘型与参数写入。");
                 identity = $"calibration:{target.Id}:{p}:{_shell.Calibration.CdInterleave}";
             }
+        }
+        else if (IsBluRayBurn && _shell.FullColor.UseForExport)
+        {
+            SourceTitle = L.T("FullColor.Title");
+            SourceDetails = _shell.FullColor.PreviewState + " · " + L.T("FullColor.ExportBeforeBurn");
+            identity = $"fullcolor:{_design.CompositeRevision}:{_shell.FullColor.IsPreviewCurrent}";
         }
         else if (IsDvdBurn)
         {
@@ -539,6 +550,8 @@ public partial class BurnViewModel : ObservableObject
             bool dvd = IsDvdBurn;
             bool bluRay = IsBluRayBurn;
             bool calibration = UseCalibrationPattern;
+            string? fullColorIso = !calibration && bluRay && _shell.FullColor.UseForExport
+                ? _shell.FullColor.RequireCurrentIso() : null;
             int preparationRevision = _burnPreparationRevision;
             OpticalBurnMediaKind mediaKind = CurrentMediaKind;
             BurnWriteSpeedOption selectedWriteSpeed = SelectedSpeed ?? BurnWriteSpeedOption.Automatic;
@@ -547,7 +560,21 @@ public partial class BurnViewModel : ObservableObject
             OpticalMediaCapacity capacity = await _opticalDiscBurner.GetMediaCapacityAsync(device.Id, mediaKind);
             if (preparationRevision != _burnPreparationRevision || !ConfirmChecked)
                 return;
-            if (calibration)
+            if (fullColorIso is not null)
+            {
+                if (_shell.FullColor.RequireCurrentIso() != fullColorIso)
+                    throw new InvalidOperationException(L.T("FullColor.Stale"));
+                if (capacity.WritableSectors < BluRayDiscParameters.SectorsPerLayer)
+                    throw new ArgumentException(L.T("FullColor.Capacity"));
+                request = new OpticalBurnRequest(device.Id, OpticalBurnMediaKind.BluRayData,
+                    25025314816L, (output, token) =>
+                    {
+                        using FileStream source = new(fullColorIso, FileMode.Open, FileAccess.Read, FileShare.Read);
+                        source.CopyToAsync(output, 1024 * 1024, token).GetAwaiter().GetResult();
+                    }, selectedWriteSpeed.Speed);
+                contentDescription = L.T("FullColor.Title") + " · " + Path.GetFileName(fullColorIso) + " · 25.03 GB";
+            }
+            else if (calibration)
             {
                 CalibrationTarget target = _shell.Calibration.Target
                     ?? throw new ArgumentException(L.T("请先在辅助标定工作区创建图案。"));

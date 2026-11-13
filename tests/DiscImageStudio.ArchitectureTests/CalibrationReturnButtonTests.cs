@@ -85,7 +85,7 @@ internal static class CalibrationReturnButtonTests
             burnHeader.Current = shell.CurrentWorkspace;
             var stages = ((IEnumerable<StageItem>)burnHeader.Stages.StageList.ItemsSource).ToArray();
             Require(stages.Select(item => item.Workspace).SequenceEqual(new[]
-                { Workspace.Design, Workspace.Export, Workspace.Burn, Workspace.Preview, Workspace.Calibration })
+                { Workspace.Design, Workspace.FullColor, Workspace.Export, Workspace.Burn, Workspace.Preview, Workspace.Calibration })
                 && stages.Count(item => item.IsGroupStart) == 1
                 && stages.Single(item => item.IsGroupStart).Workspace == Workspace.Preview,
                 "the stage rail keeps disc-making and preview/calibration grouped navigation");

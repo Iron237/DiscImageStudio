@@ -13,6 +13,11 @@ When updating dependencies or the bundled runtime, update these notices too.
 
 Components
 ----------
+- BDColorLab 64099 v0.1: GPL-3.0-only numerical full-color experiment backend,
+  adapted from the user-provided source archive. Complete corresponding source,
+  license and upstream provenance are in src/DiscImageStudio.FullColor.Engine.
+  NumPy, Pillow and SciPy are optional separately installed Python dependencies;
+  their distributions retain their own licenses and are not committed here.
 - CDImage (arduinocelentano): GPL-3.0-or-later; adapted CD-DA interleaver.
 - disc-probe (Ashley-QwQ and contributors): GPL-3.0; adapted experimental DVD bridge rule.
 - CommunityToolkit.Mvvm 8.4.0: MIT; upstream third-party notices retained.

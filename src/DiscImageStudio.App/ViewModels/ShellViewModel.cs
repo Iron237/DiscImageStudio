@@ -50,6 +50,7 @@ public partial class ShellViewModel : ObservableObject
         _presetLoadWarning = State.TryLoadPresets();
         State.SelectDefaultPresets();
         Design = new DesignViewModel(this, State, dispatcher);
+        FullColor = new FullColorViewModel(this);
         LivePreview = new LivePreviewViewModel(_dispatcher, this, State);
         Home = new HomeViewModel(this, State, _recentProjects);
         var calibrationState = new DiscParametersState();
@@ -93,6 +94,7 @@ public partial class ShellViewModel : ObservableObject
     /// <summary>The export workspace: writes the design composite to a file. Its only job is
     /// the file destination; disc writing lives in the burn workspace next door.</summary>
     public ExportViewModel Export { get; }
+    public FullColorViewModel FullColor { get; }
 
     /// <summary>Streams the active project's composite using its project geometry.</summary>
     public BurnViewModel Burn { get; }
@@ -229,7 +231,7 @@ public partial class ShellViewModel : ObservableObject
     }
 
     public bool IsProjectMode => CurrentWorkspace is Workspace.Design or Workspace.Preview or Workspace.Export or Workspace.Burn
-        || IsProjectOpen && CurrentWorkspace is Workspace.Calibration or Workspace.CalibrationBurn;
+        || IsProjectOpen && CurrentWorkspace is Workspace.Calibration or Workspace.CalibrationBurn or Workspace.FullColor;
 
     public bool IsJobDockVisible => CurrentWorkspace != Workspace.Home || IsJobRunning;
 
@@ -418,6 +420,7 @@ public partial class ShellViewModel : ObservableObject
         Drive.Relocalize();
         Export.Relocalize();
         Calibration.Relocalize();
+        FullColor.Relocalize();
     }
 
     /// <summary>Back home leaves the open project behind (the sidebar hides), so it belongs
@@ -1127,7 +1130,8 @@ public partial class ShellViewModel : ObservableObject
         string status,
         string outputPath,
         Func<IProgress<DiscJobProgress>, CancellationToken, DiscImageResult> generate,
-        string? details = null)
+        string? details = null,
+        bool canPreviewOutput = true)
     {
         if (_isBusy)
         {
@@ -1205,7 +1209,7 @@ public partial class ShellViewModel : ObservableObject
             JobProgressValue = 100;
             JobHasResult = true;
             HasJobOutput = true;
-            CanPreviewLastOutput = IsDiscArtifact(_lastOutputPath);
+            CanPreviewLastOutput = canPreviewOutput && IsDiscArtifact(_lastOutputPath);
             JobStatusText = L.T("完成：") + Path.GetFileName(_lastOutputPath);
             AppendLog(L.F($"[{DateTime.Now:HH:mm:ss}] 完成：{_lastOutputPath}\n"));
         }

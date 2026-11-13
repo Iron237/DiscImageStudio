@@ -46,6 +46,7 @@ public partial class StageBar : UserControl
     private static readonly (Workspace Workspace, string Key)[] Stages =
     [
         (Workspace.Design, "设计"),
+        (Workspace.FullColor, "FullColor.Title"),
         (Workspace.Export, "导出"),
         (Workspace.Burn, "刻录"),
         (Workspace.Preview, "预览"),

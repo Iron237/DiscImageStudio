@@ -67,9 +67,15 @@
         <controls:PageHeader Grid.Row="0" Title="{loc:Text Xaml.Design}" Badge="{Binding FamilyLabel}"
                              Workspace="{x:Static vm:Workspace.Design}">
             <controls:PageHeader.Actions>
+                <StackPanel Orientation="Horizontal">
+                <controls:VisibilityGate IsOpen="{Binding IsBluRay}">
+                    <Button Style="{StaticResource CompactButton}" Content="{loc:Text FullColor.Next}" Command="{Binding NavigateCommand}"
+                            CommandParameter="{x:Static vm:Workspace.FullColor}" Margin="0,0,8,0" />
+                </controls:VisibilityGate>
                 <Button Style="{StaticResource CompactButton}" Content="{loc:Text Xaml.NextPreview}"
                         Command="{Binding NavigateCommand}"
                         CommandParameter="{x:Static vm:Workspace.Preview}" />
+                </StackPanel>
             </controls:PageHeader.Actions>
         </controls:PageHeader>
 

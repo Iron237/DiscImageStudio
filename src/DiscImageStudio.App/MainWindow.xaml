@@ -156,6 +156,8 @@
                                    Margin="12,6,0,4" />
                         <controls:SideNavItem x:Name="NavDesign" LabelText="{loc:Text Xaml.Design}"
                                               IconKind="Palette" />
+                        <controls:SideNavItem x:Name="NavFullColor" LabelText="{loc:Text FullColor.Title}"
+                                              IconKind="Rainbow" />
                         <controls:SideNavItem x:Name="NavExport" LabelText="{loc:Text Xaml.Export}"
                                               IconKind="FileDown" />
                         <controls:SideNavItem x:Name="NavBurn" LabelText="{loc:Text Xaml.Burn}"

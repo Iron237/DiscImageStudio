@@ -1,0 +1,51 @@
+{
+  "schema": "bdcolor-config-v1",
+  "presetId": "bd-r-verbatim-64099",
+  "name": "Verbatim BD-R 64099 — DIS v1.5.0 measured geometry",
+  "source": "https://github.com/JiaFeiMiao-K-Cat/DiscImageStudio/blob/v1.5.0/src/DiscImageStudio.Core/Presets/built-in-disc-presets.json",
+  "geometry": {
+    "totalSectors": 12219392,
+    "usableSectors": 12219392,
+    "innerRadiusMm": 23.987042157339335,
+    "outerRadiusMm": 57.987960341783236,
+    "startAngleDegrees": 0,
+    "pitchLinear": 0,
+    "pitchQuadratic": 0,
+    "pitchCubic": 0,
+    "invertMapping": false
+  },
+  "patch": {
+    "centerMm": [
+      0.0,
+      43.0
+    ],
+    "widthMm": 20.0,
+    "heightMm": 12.0,
+    "microcellMm": 0.05,
+    "macrocellMm": 0.25
+  },
+  "optics": {
+    "coordinateSystem": "data side: X right, Y up, Z toward viewer; disc lies in Z=0",
+    "lightPositionMm": [
+      453.55736761107266,
+      43.0,
+      400.0
+    ],
+    "viewerPositionMm": [
+      0.0,
+      43.0,
+      400.0
+    ],
+    "illuminantModel": "equal-energy",
+    "spectralBlurNm": 9.0,
+    "backgroundLevel": 0.008,
+    "targetExposure": 0.28,
+    "note": "Unmeasured scalar along-track spectrum surrogate; not a calibrated material/2D/pupil/drive model. Replace with measured response for physical color work. Default lighting selected by a coarse SURROGATE gamut scan, not physical optimization."
+  },
+  "export": {
+    "background": "zero-user-payload",
+    "noFilesystem": true,
+    "requireFullCapacity": true,
+    "writingSpeed": "Choose a speed jointly supported by burner and media; this config does not set a speed."
+  }
+}

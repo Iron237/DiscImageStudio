@@ -47,6 +47,13 @@
     <Resource Include="Assets\DiscImageStudio-256.png" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="..\DiscImageStudio.FullColor.Engine\**\*.py;..\DiscImageStudio.FullColor.Engine\**\*.json;..\DiscImageStudio.FullColor.Engine\requirements.txt" Exclude="..\DiscImageStudio.FullColor.Engine\tests\**">
+      <Link>FullColorEngine\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
     <EmbeddedResource Include="Localization\Catalogs\*.json" />
     <EmbeddedResource Include="..\..\LICENSE" LogicalName="DiscImageStudio.Licenses.GPL" />
     <EmbeddedResource Include="..\..\THIRD-PARTY-NOTICES.txt" LogicalName="DiscImageStudio.Licenses.ThirdParty" />
@@ -61,7 +68,9 @@
          RID and non-RID references can otherwise publish the solver config twice. -->
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
-          Condition="'%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'DvdImageSolver.runtimeconfig.json'" />
+          Condition="'%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'DvdImageSolver.runtimeconfig.json'
+              Or '%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'DvdImageSolver.deps.json'
+              Or '%(ResolvedFileToPublish.RelativePath)' == 'DvdImageSolver.exe'" />
     </ItemGroup>
   </Target>
 </Project>

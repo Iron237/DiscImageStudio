@@ -91,12 +91,18 @@
 
                     <controls:VisibilityGate IsOpen="{Binding IsBluRay}">
                         <StackPanel>
+                            <CheckBox Content="{loc:Text FullColor.UseForExport}" IsChecked="{Binding FullColor.UseForExport}"
+                                      IsEnabled="{Binding FullColor.CanEdit}" Margin="0,0,0,12" />
                             <controls:PathField Label="{loc:Text Xaml.OutputISO}"
                                                 Text="{Binding State.BdOutputPath}"
                                                 ButtonLabel="{loc:Text Xaml.Select}"
                                                 Command="{Binding BrowseOutputCommand}" />
-                            <TextBlock Style="{StaticResource FieldLabel}" Margin="0,14,0,6" Text="{loc:Text Xaml.VolumeLabel}" />
-                            <TextBox Text="{Binding State.BdVolumeLabel, UpdateSourceTrigger=PropertyChanged}" MaxLength="32" />
+                            <controls:VisibilityGate IsOpen="{Binding FullColor.UseForExport}" Inverted="True">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Margin="0,14,0,6" Text="{loc:Text Xaml.VolumeLabel}" />
+                                    <TextBox Text="{Binding State.BdVolumeLabel, UpdateSourceTrigger=PropertyChanged}" MaxLength="32" />
+                                </StackPanel>
+                            </controls:VisibilityGate>
                         </StackPanel>
                     </controls:VisibilityGate>
 

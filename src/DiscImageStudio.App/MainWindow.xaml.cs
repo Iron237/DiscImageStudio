@@ -70,10 +70,12 @@ public partial class MainWindow : Window
             new BurnView(_shell.Burn),
             new CalibrationView(_shell.Calibration),
             new BurnView(_shell.CalibrationBurn),
+            new FullColorView(_shell.FullColor),
         ];
         _navItems =
         [
             (NavDesign, Workspace.Design),
+            (NavFullColor, Workspace.FullColor),
             (NavExport, Workspace.Export),
             (NavBurn, Workspace.Burn),
             (NavPreview, Workspace.Preview),
@@ -153,6 +155,11 @@ public partial class MainWindow : Window
         if (workspace == Workspace.Burn && string.Equals(burnSource, "calibration", StringComparison.OrdinalIgnoreCase))
             workspace = Workspace.CalibrationBurn;
         _shell.SelectWorkspace(workspace);
+        if (workspace == Workspace.FullColor)
+        {
+            if (!string.IsNullOrWhiteSpace(previewPath)) _shell.FullColor.LoadPlan(previewPath, applyConfiguration: true);
+            return;
+        }
         if (workspace is Workspace.Burn or Workspace.CalibrationBurn)
         {
             if (workspace == Workspace.CalibrationBurn)
@@ -485,7 +492,12 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.S && Keyboard.Modifiers is ModifierKeys.Control or (ModifierKeys.Control | ModifierKeys.Shift))
         {
-            if (_shell.CurrentWorkspace is Workspace.Calibration or Workspace.CalibrationBurn)
+            if (_shell.CurrentWorkspace == Workspace.FullColor)
+            {
+                e.Handled = true;
+                if (_shell.FullColor.SaveRecipeCommand.CanExecute(null)) _shell.FullColor.SaveRecipeCommand.Execute(null);
+            }
+            else if (_shell.CurrentWorkspace is Workspace.Calibration or Workspace.CalibrationBurn)
             {
                 e.Handled = true;
                 if (_shell.Calibration.SaveSessionCommand.CanExecute(null))
