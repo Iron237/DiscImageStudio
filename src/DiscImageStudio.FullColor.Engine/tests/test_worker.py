@@ -7,6 +7,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import errno
+import threading
 from unittest.mock import patch
 import numpy as np
 from PIL import Image
@@ -256,6 +258,107 @@ class WorkflowTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):plans.append(Path(worker.execute(request)))
         self.assertEqual((plans[0].parent/'texture_ids.npy').read_bytes(),(plans[1].parent/'texture_ids.npy').read_bytes())
         self.assertEqual((plans[0].parent/'predicted.png').read_bytes(),(plans[1].parent/'predicted.png').read_bytes())
+
+    def test_15_checkpoint_replacement_retries_a_transient_access_denial(self):
+        with contextlib.redirect_stdout(io.StringIO()):plan=worker.execute(self.request('checkpoint-lock'))
+        r=Renderer(plan);start=int(r.candidates()[len(r.candidates())//2])
+        output=self.root/'checkpoint-lock.bin';checkpoint=Path(str(output)+'.partial.resume.json')
+        replace=os.replace;denied=[]
+        def temporarily_busy(source,destination):
+            if Path(destination)==checkpoint and checkpoint.exists() and not denied:
+                denied.append(True)
+                error=PermissionError(errno.EACCES,'injected transient sharing lock');error.winerror=5
+                raise error
+            return replace(source,destination)
+        with patch('os.replace',temporarily_busy):
+            result=export(plan,output,allow_unmeasured=True,fragment_clusters=1001,start_cluster=start,workers=2,log=lambda _:None)
+        self.assertTrue(denied)
+        self.assertGreater(verify_export(plan,result,log=lambda _:None),0)
+
+    def test_16_confirmed_overwrite_preserves_old_image_until_success(self):
+        with contextlib.redirect_stdout(io.StringIO()):plan=worker.execute(self.request('overwrite'))
+        r=Renderer(plan);start=int(r.candidates()[len(r.candidates())//2])
+        options=dict(allow_unmeasured=True,fragment_clusters=96,start_cluster=start,workers=2,log=lambda _:None)
+        output=self.root/'overwrite.bin';old=b'previous valid image';output.write_bytes(old)
+        sidecar=Path(str(output)+'.json');sidecar.write_text('{"old":true}')
+        with self.assertRaises(FileExistsError):export(plan,output,**options)
+        original=Renderer.render_cluster
+        def failure(renderer,cluster):
+            if cluster==start+40:raise OSError('injected overwrite calculation failure')
+            return original(renderer,cluster)
+        with patch.object(Renderer,'render_cluster',failure):
+            with self.assertRaisesRegex(OSError,'injected overwrite calculation failure'):
+                export(plan,output,overwrite=True,**options)
+        self.assertEqual(output.read_bytes(),old)
+        self.assertEqual(sidecar.read_text(),'{"old":true}')
+        export(plan,output,overwrite=True,resume=True,**options)
+        self.assertNotEqual(output.read_bytes(),old)
+        self.assertGreater(verify_export(plan,output,log=lambda _:None),0)
+
+    def test_17_metadata_publication_can_resume_without_rewriting_image(self):
+        with contextlib.redirect_stdout(io.StringIO()):plan=worker.execute(self.request('publication'))
+        r=Renderer(plan);start=int(r.candidates()[len(r.candidates())//2])
+        output=self.root/'publication.bin';output.write_bytes(b'previous image')
+        sidecar=Path(str(output)+'.json');sidecar.write_text('{"previous":true}')
+        options=dict(allow_unmeasured=True,fragment_clusters=96,start_cluster=start,workers=2,overwrite=True,log=lambda _:None)
+        replace=os.replace
+        def busy_metadata(source,destination):
+            if Path(destination)==sidecar:
+                error=PermissionError(errno.EACCES,'injected metadata lock');error.winerror=5;raise error
+            return replace(source,destination)
+        with patch('os.replace',busy_metadata),patch('bdcolor.storage._RETRY_SECONDS',0):
+            with self.assertRaises(PermissionError):export(plan,output,**options)
+        self.assertFalse(Path(str(output)+'.partial').exists())
+        self.assertTrue(Path(str(output)+'.partial.publish.json').exists())
+        completed=output.read_bytes()
+        original=Renderer.render_cluster;checks=[]
+        def counted(renderer,cluster):checks.append(cluster);return original(renderer,cluster)
+        with patch.object(Renderer,'render_cluster',counted):export(plan,output,resume=True,**options)
+        self.assertLessEqual(len(checks),5)
+        self.assertEqual(output.read_bytes(),completed)
+        self.assertFalse(Path(str(output)+'.partial.publish.json').exists())
+        self.assertGreater(verify_export(plan,output,log=lambda _:None),0)
+
+    def test_18_only_one_export_can_own_a_partial(self):
+        with contextlib.redirect_stdout(io.StringIO()):plan=worker.execute(self.request('single-owner'))
+        r=Renderer(plan);start=int(r.candidates()[len(r.candidates())//2])
+        output=self.root/'owned.bin';ready=threading.Event();release=threading.Event();errors=[]
+        options=dict(allow_unmeasured=True,fragment_clusters=32,start_cluster=start,workers=1,log=lambda _:None)
+        original=Renderer.render_cluster
+        def paused(renderer,cluster):
+            if threading.current_thread().name=='export-owner' and not ready.is_set():
+                ready.set();release.wait(5)
+            return original(renderer,cluster)
+        def owner():
+            try:export(plan,output,**options)
+            except BaseException as error:errors.append(error)
+        with patch.object(Renderer,'render_cluster',paused):
+            thread=threading.Thread(target=owner,name='export-owner');thread.start()
+            try:
+                self.assertTrue(ready.wait(5))
+                with self.assertRaisesRegex(FileExistsError,'Another export'):
+                    export(plan,output,resume=True,**options)
+            finally:release.set();thread.join(10)
+        self.assertFalse(thread.is_alive());self.assertFalse(errors)
+        self.assertGreater(verify_export(plan,output,log=lambda _:None),0)
+
+    @unittest.skipUnless(os.name=='nt','Windows delete-sharing behavior')
+    def test_19_actual_windows_read_handle_can_release_during_atomic_save(self):
+        import ctypes
+        from ctypes import wintypes
+        from bdcolor.storage import atomic_json
+        target=self.root/'windows-sharing.json';target.write_text('{"old":true}')
+        kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+        create=kernel.CreateFileW
+        create.argtypes=[wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,wintypes.DWORD,wintypes.HANDLE]
+        create.restype=wintypes.HANDLE
+        close=kernel.CloseHandle;close.argtypes=[wintypes.HANDLE];close.restype=wintypes.BOOL
+        handle=create(str(target),0x80000000,3,None,3,0x80,None)  # No FILE_SHARE_DELETE.
+        self.assertNotEqual(handle,ctypes.c_void_p(-1).value)
+        timer=threading.Timer(.15,lambda:close(handle));timer.start()
+        try:atomic_json(target,{'new':True})
+        finally:timer.join()
+        self.assertEqual(json.loads(target.read_text()),{'new':True})
 
 
 if __name__ == '__main__':

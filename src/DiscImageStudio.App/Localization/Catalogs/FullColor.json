@@ -56,6 +56,8 @@
   "FullColor.Runtime": {"zh-CN":"运行环境（高级）","en":"Runtime (advanced)"},
   "FullColor.RuntimeHint": {"zh-CN":"需要 NumPy、Pillow、SciPy。首次预览自动构建模型色谱；后续复用缓存。","en":"Requires NumPy, Pillow and SciPy. The first preview builds synthetic spectra; later runs reuse the cache."},
   "FullColor.InvalidNumber": {"zh-CN":"请输入有限数值，使用小数点。","en":"Enter a finite number using a decimal point."},
+  "FullColor.Replace": {"zh-CN":"替换已有 ISO","en":"Replace existing ISO"},
+  "FullColor.ReplaceHint": {"zh-CN":"新镜像完整生成后才替换已有文件。若文件正在被其他程序使用，关闭占用后可从断点完成发布。","en":"The existing image is replaced only after the new image is complete. If another application is using it, close that application and resume publication."},
   "FullColor.Resume": {"zh-CN":"继续导出","en":"Resume export"},
   "FullColor.ResumeHint": {"zh-CN":"发现断点记录。使用当前相同计划继续？未完成的 .partial 不能刻录。","en":"A checkpoint exists. Resume with this same plan? Never burn an unfinished .partial file."},
   "FullColor.CalibrationRegion": {"zh-CN":"标定窗口（仅用于 64 纹理计划）","en":"Calibration window (64-texture plan only)"},

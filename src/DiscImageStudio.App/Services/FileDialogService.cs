@@ -58,6 +58,7 @@ internal sealed class FileDialogService
             Filter = filter,
             DefaultExt = extension,
             AddExtension = true,
+            OverwritePrompt = true,
             FileName = fileName,
         };
         return dialog.ShowDialog(_ownerProvider()) == true ? dialog.FileName : null;

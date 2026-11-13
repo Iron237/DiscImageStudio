@@ -9,10 +9,11 @@ from pathlib import Path
 from contextlib import closing
 import numpy as np
 from .parallel import worker_count,ordered_map,requested_workers,adaptive_threads,enable_all_cpus
+from .storage import atomic_json,publish_file,output_lock,image_identity,retry_file_operation
 from .core import (Geometry,MaskBank,payload_layout,SECTOR_BYTES,CLUSTER_BYTES,
                    CHANNEL_BITS_PER_RUB)
 from .colour import texture_digest,optical_signature
-from .pipeline import save_json,render_patch
+from .pipeline import render_patch
 
 
 class Renderer:
@@ -183,14 +184,34 @@ def _initialize_output(file,length):
     return False
 
 
-def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_cluster=None,resume=False,work_limit=None,log=print,workers=None):
+def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_cluster=None,resume=False,work_limit=None,log=print,workers=None,overwrite=False):
+    with output_lock(output):
+        return _export(plan_path,output,allow_unmeasured,fragment_clusters,start_cluster,resume,work_limit,log,workers,overwrite)
+
+
+def _export(plan_path,output,allow_unmeasured,fragment_clusters,start_cluster,resume,work_limit,log,workers,overwrite):
     renderer=Renderer(plan_path);p=renderer.plan;out=Path(output)
     if p['responseMode'].startswith('unmeasured') and not allow_unmeasured:
         raise ValueError('This image uses an UNMEASURED color surrogate. Inspect preview/error maps, then explicitly add --allow-unmeasured to export a trial image. No accurate physical color is promised.')
     out.parent.mkdir(parents=True,exist_ok=True)
     partial=out.with_name(out.name+'.partial')
     checkpoint=out.with_name(out.name+'.partial.resume.json')
-    if out.exists(): raise FileExistsError('Output already exists; choose another path.')
+    publication=out.with_name(out.name+'.partial.publish.json')
+    plan_hash=hashlib.sha256(Path(plan_path).read_bytes()).hexdigest()
+    if resume and not partial.exists() and out.is_file() and publication.exists() and checkpoint.exists():
+        staged=json.loads(publication.read_text(encoding='utf-8'))
+        previous=json.loads(checkpoint.read_text(encoding='utf-8'))
+        identity=staged.get('_publicationIdentity')
+        if (staged.get('planSha256')!=plan_hash or previous.get('planSha256')!=plan_hash
+            or previous.get('nextCandidate')!=previous.get('candidateCount')
+            or not identity or not identity.get('inode') or identity!=image_identity(out)):
+            raise ValueError('Pending publication does not identify this completed image/plan.')
+        verify_export(plan_path,out,log=log,metadata_path=publication)
+        publish_file(publication,str(out)+'.json',overwrite=True)
+        _remove_checkpoint(checkpoint,log)
+        log('Completed image metadata recovered; no sectors needed to be recalculated.')
+        return out
+    if out.exists() and not overwrite: raise FileExistsError('Output already exists. Confirm replacement in DIS, or choose another path.')
     if partial.exists() and not resume: raise FileExistsError('A .partial exists; use --resume with the SAME plan, or choose another path.')
     if resume and (not partial.exists() or not checkpoint.exists()): raise FileNotFoundError('Both .partial and .partial.resume.json are required for resume.')
     if work_limit is not None and int(work_limit)<=0: raise ValueError('work-limit must be >0.')
@@ -209,15 +230,23 @@ def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_
             raise OSError(f'Need at least {length+128*1024*1024:,} free bytes (conservative check even with sparse output).')
     log(f'Output logical length: {length:,} bytes; geometry stays {renderer.geometry.n:,} sectors.')
     if fragment_clusters is None: log(f'Optical patch touches at most {len(work):,} / {renderer.geometry.n//32:,} clusters; other user bytes are valid zeros.')
-    plan_hash=hashlib.sha256(Path(plan_path).read_bytes()).hexdigest()
     begin=0;sample_hashes={};accumulated=0.
     if resume:
         previous=json.loads(checkpoint.read_text(encoding='utf-8'))
         if previous['planSha256']!=plan_hash or previous['logicalSizeBytes']!=length or previous['candidateCount']!=len(work):
             raise ValueError('Resume checkpoint does not match this plan/range.')
-        if partial.stat().st_size!=length: raise ValueError('Partial file size changed.')
+        if partial.stat().st_size!=length:
+            if int(previous['nextCandidate'])==0 and not previous['sampleClusterSha256']:
+                with partial.open('r+b') as stream: _initialize_output(stream,length)
+            else: raise ValueError('Partial file size changed.')
         begin=int(previous['nextCandidate']);sample_hashes=previous['sampleClusterSha256'];accumulated=float(previous['seconds'])
         if not 0<=begin<=len(work): raise ValueError('Bad resume cursor.')
+        # Reject a stale checkpoint paired with a different/truncated partial.
+        with partial.open('rb') as stream:
+            for cluster,digest in sample_hashes.items():
+                stream.seek((int(cluster)-base)*CLUSTER_BYTES)
+                if hashlib.sha256(stream.read(CLUSTER_BYTES)).hexdigest()!=digest:
+                    raise ValueError('Partial data does not match its committed checkpoint.')
         log(f'Resuming at candidate {begin:,}/{len(work):,}.')
     stop=len(work) if work_limit is None else min(len(work),begin+int(work_limit))
     if requested_workers(workers)==0: enable_all_cpus()
@@ -259,11 +288,12 @@ def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_
         state={'planSha256':plan_hash,'logicalSizeBytes':length,'candidateCount':len(work),
             'nextCandidate':next_index,'sampleClusterSha256':sample_hashes,
             'seconds':accumulated+time.monotonic()-clock}
-        tmp=checkpoint.with_suffix('.tmp')
-        save_json(tmp,state);tmp.replace(checkpoint)
+        atomic_json(checkpoint,state)
     with open(partial,'r+b' if resume else 'xb') as f:
         if not resume:
-            _initialize_output(f,length);save_checkpoint(0,f)
+            # Commit cursor zero before extending a fresh file, so an old
+            # same-name checkpoint can never describe a new zero-filled image.
+            save_checkpoint(0,f);_initialize_output(f,length)
         try:
             with closing(rendered_clusters()) as rendered:
                 for k,data in rendered:
@@ -287,7 +317,6 @@ def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_
         log(f'Paused safely at {stop:,}/{len(work):,}. Continue with --resume.')
         return None
     if partial.stat().st_size!=length: raise IOError('Incorrect output length.')
-    partial.rename(out)
     metadata={'format':'bdcolor-raw-user-sectors-v1' if fragment_clusters is None else 'bdcolor-NONBURNABLE-fragment-v1',
         'burnableContainer':fragment_clusters is None,'physicalBurnTested':False,'colorValidated':False,
         'noFilesystem':True,'logicalSizeBytes':length,'geometry':renderer.geometry.g,
@@ -297,17 +326,33 @@ def export(plan_path,output,allow_unmeasured=False,fragment_clusters=None,start_
         'execution':{'availableWorkers':maximum_workers,'renderWorkers':cpu_workers,'batchClusters':batch_size,'cpuProbes':probes},
         'seconds':round(accumulated+time.monotonic()-clock,3),
         'warning':'Pure drawing raw sectors; no ISO9660/UDF. This file is not an upstream DIS bd-r-image-v1 sidecar; DIS AA/44 preview cannot reproduce these colors.'}
-    save_json(str(out)+'.json',metadata)
-    checkpoint.unlink(missing_ok=True)
+    metadata['_publicationIdentity']=image_identity(partial)
+    atomic_json(publication,metadata)
+    # Keep any previous ISO intact until the completed new payload has passed
+    # the same software sample/hash checks used by the GUI.
+    verify_export(plan_path,partial,log=log,metadata_path=publication)
+    try:
+        publish_file(partial,out,overwrite=overwrite)
+        publish_file(publication,str(out)+'.json',overwrite=True)
+    except OSError:
+        log('Publication is blocked. Completed image data and its checkpoint are retained; close the application using the path, then resume with the same plan.')
+        raise
+    _remove_checkpoint(checkpoint,log)
     return out
 
 
-def verify_export(plan_path,image_path,log=print):
+def _remove_checkpoint(path,log):
+    try: retry_file_operation(lambda:Path(path).unlink(missing_ok=True),path)
+    except PermissionError:
+        log('Image and metadata are complete; a busy obsolete checkpoint could not yet be removed.')
+
+
+def verify_export(plan_path,image_path,log=print,metadata_path=None):
     """Reconstructs selected clusters and independently reverses mask values.
     This is SOFTWARE verification, not a physical readback / optics test.
     """
     r=Renderer(plan_path);path=Path(image_path)
-    m=json.loads(Path(str(path)+'.json').read_text(encoding='utf-8'))
+    m=json.loads(Path(metadata_path or str(path)+'.json').read_text(encoding='utf-8'))
     if m['planSha256']!=hashlib.sha256(Path(plan_path).read_bytes()).hexdigest(): raise ValueError('Wrong plan for this export.')
     if path.stat().st_size!=m['logicalSizeBytes']: raise ValueError('Wrong image size.')
     base=m['startCluster'];checked=0

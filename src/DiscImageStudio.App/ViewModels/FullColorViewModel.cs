@@ -345,12 +345,13 @@ public partial class FullColorViewModel : ObservableObject
         {
             string? output = _shell.Dialogs?.PickSave("BD-R ISO|*.iso", ".iso", _calibration ? "palette-64099.iso" : "fullcolor-64099.iso");
             if (output is null) return;
-            await ExportToAsync(output);
+            // SaveFileDialog has already obtained overwrite confirmation.
+            await ExportToAsync(output, overwriteConfirmed: File.Exists(output));
         }
         catch (Exception e) { ShowError(e); }
     }
 
-    internal async Task<bool> ExportToAsync(string output)
+    internal async Task<bool> ExportToAsync(string output, bool overwriteConfirmed = false)
     {
             RequireProjectGeometry();
             if (!IsPreviewCurrent || _planPath is null || _planSignature != Signature())
@@ -362,12 +363,16 @@ public partial class FullColorViewModel : ObservableObject
             if (plan["responseMode"]!.GetValue<string>().StartsWith("unmeasured", StringComparison.Ordinal) && !AllowUnmeasured)
                 throw new InvalidOperationException(L.T("FullColor.AcceptRequired"));
             if (string.IsNullOrWhiteSpace(output)) throw new ArgumentException(L.T("请选择蓝光 ISO 输出位置。"));
-            bool resume = File.Exists(output + ".partial.resume.json");
+            bool overwrite = File.Exists(output);
+            if (overwrite && !overwriteConfirmed && !await _shell.ConfirmAsync(
+                L.T("FullColor.Replace"), L.T("FullColor.ReplaceHint") + Environment.NewLine + output, L.T("FullColor.Replace"))) return false;
+            bool resume = File.Exists(output + ".partial.resume.json")
+                && (File.Exists(output + ".partial") || File.Exists(output + ".partial.publish.json"));
             if (resume && !await _shell.ConfirmAsync(L.T("FullColor.Resume"), L.T("FullColor.ResumeHint"), L.T("FullColor.Resume"))) return false;
             string root = Path.GetFullPath(OutputRoot);
             JsonObject request = new() { ["operation"] = "export", ["directory"] = Path.GetDirectoryName(_planPath),
                 ["workRoot"] = root, ["planPath"] = _planPath, ["outputPath"] = output,
-                ["allowUnmeasured"] = AllowUnmeasured, ["resume"] = resume };
+                ["allowUnmeasured"] = AllowUnmeasured, ["resume"] = resume, ["overwrite"] = overwrite };
             bool success = await _shell.RunImageJobAsync(L.T("FullColor.Export"), output,
                 (progress, token) => _engine.Run(PythonPath, request, output, progress, token), canPreviewOutput: false);
             if (success && !_calibration) { _isoPath = output; _isoSignature = Signature(); }

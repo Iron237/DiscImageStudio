@@ -55,6 +55,7 @@ jobs:
           if (-not (Test-Path "$app/FullColorEngine/worker.py")) { throw 'Color engine missing from build output' }
           if (-not (Test-Path "$app/FullColorEngine/bdcolor/parallel.py")) { throw 'CPU scheduler missing from build output' }
           if (-not (Test-Path "$app/FullColorEngine/bdcolor/solve.py")) { throw 'Parallel solver missing from build output' }
+          if (-not (Test-Path "$app/FullColorEngine/bdcolor/storage.py")) { throw 'Recoverable export storage missing from build output' }
           if (-not (Test-Path "$app/FullColorEngine/configs/verbatim_64099.json")) { throw 'Color configuration missing from build output' }
       - uses: actions/upload-artifact@v4
         with:

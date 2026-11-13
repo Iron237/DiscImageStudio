@@ -128,6 +128,17 @@ internal static class FullColorWorkflowTests
             try { vm.RequireCurrentIso(); } catch (ArgumentException) { filesRejected = true; }
             Require(filesRejected, "the drawing-only color workflow cannot silently discard project files");
             shell.State.BdDataDirectory = string.Empty;
+            vm.LoadPlan(plan, applyConfiguration: true);
+            vm.AllowUnmeasured = true;
+            string occupiedOutput = Path.Combine(directory, "existing.iso");
+            File.WriteAllText(occupiedOutput, "previous-image");
+            int overwriteQuestions = 0;
+            shell.ConfirmHandler = (_, _, _) => { overwriteQuestions++; return Task.FromResult(false); };
+            Task<bool> declined = vm.ExportToAsync(occupiedOutput);
+            Pump(declined);
+            Require(!declined.Result && overwriteQuestions == 1 && File.ReadAllText(occupiedOutput) == "previous-image",
+                "existing ISO replacement requires confirmation and declining preserves the file");
+            shell.ConfirmHandler = null;
             if (Environment.GetEnvironmentVariable("DIS_TEST_FULLCOLOR_PYTHON") is { Length: > 0 } python)
             {
                 vm.PythonPath = python;
@@ -159,6 +170,15 @@ internal static class FullColorWorkflowTests
                     "the native Export workspace consumes the current Full Color plan");
                 Require(vm.RequireCurrentIso() == shell.State.BdOutputPath && !shell.CanPreviewLastOutput,
                     "burning consumes that full ISO and never sends it to ordinary grayscale readback");
+                string oldIdentity = JsonNode.Parse(File.ReadAllText(shell.State.BdOutputPath + ".json"))!["_publicationIdentity"]!.ToJsonString();
+                int acceptedOverwrite = 0;
+                shell.ConfirmHandler = (_, _, _) => { acceptedOverwrite++; return Task.FromResult(true); };
+                Pump(shell.Export.GenerateCommand.ExecuteAsync(null), 600);
+                Require(acceptedOverwrite == 1 && vm.RequireCurrentIso() == shell.State.BdOutputPath,
+                    "the Export workspace forwards explicit same-name replacement approval");
+                string newIdentity = JsonNode.Parse(File.ReadAllText(shell.State.BdOutputPath + ".json"))!["_publicationIdentity"]!.ToJsonString();
+                Require(oldIdentity != newIdentity, "confirmed overwrite commits a new file instead of retaining stale output");
+                shell.ConfirmHandler = null;
                 }
                 shell.Design.Layers[0].TranslateXMm += 2;
                 Require(!vm.IsPreviewCurrent && !vm.ExportCommand.CanExecute(null), "moving a design layer invalidates the generated result");

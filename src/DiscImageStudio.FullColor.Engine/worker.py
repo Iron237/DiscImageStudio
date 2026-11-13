@@ -24,7 +24,7 @@ for _library_variable in ('OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THRE
 os.environ['OPENBLAS_MAIN_FREE']='1'
 from bdcolor.colour import build_spectra
 from bdcolor.pipeline import build_plan, calibration_plan, save_json, image_to_rgb, render_patch
-from bdcolor.writer import export, verify_export
+from bdcolor.writer import export
 from PIL import Image, ImageOps
 
 
@@ -111,8 +111,8 @@ def execute(request):
     elif operation == 'export':
         result = export(request['planPath'], request['outputPath'],
                         allow_unmeasured=bool(request.get('allowUnmeasured')),
-                        resume=bool(request.get('resume')), log=emit, workers=request.get('workers'))
-        verify_export(request['planPath'], result, log=emit)
+                        resume=bool(request.get('resume')), log=emit, workers=request.get('workers'),
+                        overwrite=bool(request.get('overwrite')))
     else:
         raise ValueError('Unsupported full-color operation: ' + operation)
     emit('Completed: ' + str(result), 1.0)
