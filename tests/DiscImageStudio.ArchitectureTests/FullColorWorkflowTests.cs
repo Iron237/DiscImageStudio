@@ -144,6 +144,8 @@ internal static class FullColorWorkflowTests
                 Require(result["configuration"]!["imageLayout"]!.GetValue<string>() == "disc-annulus"
                     && result["metrics"]!["coloredMacrocellCount"]!.GetValue<int>() > 0,
                     "art below the old upper-window ROI survives full-annulus sampling");
+                Require(result["metrics"]!["textureCountUsed"]!.GetValue<int>() > 1,
+                    "the inherited design generates written texture dots as well as background");
                 Require(vm.NativeDitherPreview is not null && vm.TexturePreview is not null,
                     "native dithering and the exported texture-dot grid can be inspected");
                 Require(result["designSource"]!["fingerprint"]!.GetValue<string>() == vm.DesignFingerprint(),

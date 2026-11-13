@@ -84,9 +84,10 @@ def build_plan(input_path,config_path,spectra_path,out,measurements=None,log=pri
     im=image_to_rgb(input_path)
     fitted=ImageOps.pad(im,(nx,ny),method=Image.Resampling.LANCZOS,color='black')
     rgb=np.asarray(fitted)/255.
-    # Native AdjustedGray applies gamma in linear density space when enabled.
-    # Do not linearize its output a second time.
-    linear=rgb if cfg.get('tone',{}).get('srgbLinearization',False) else to_linear(rgb)
+    # Native AdjustedGray outputs dot density in BOTH modes. Applying an automatic
+    # transfer afterward would cancel the design's gamma switch (or apply it twice).
+    # The standalone legacy engine still accepts ordinary encoded sRGB images.
+    linear=rgb if 'tone' in cfg else to_linear(rgb)
     target=linear@RGB_TO_XYZ.T*cfg['optics']['targetExposure']
     xs=cx-w/2+(np.arange(nx)+.5)*macro;ys=cy+h/2-(np.arange(ny)+.5)*macro
     radii=np.hypot(xs[None,:],ys[:,None])
@@ -130,7 +131,7 @@ def build_plan(input_path,config_path,spectra_path,out,measurements=None,log=pri
             delta_grid[iy,ix],mismatch[iy,ix]=local_geometry(x,y,cfg)
         if iy%8==0 or iy+1==ny: log(f'Color solve: row {iy+1}/{ny}')
     display=to_srgb((predicted/cfg['optics']['targetExposure'])@XYZ_TO_RGB.T)
-    intended=Image.fromarray(np.round((to_srgb(linear) if cfg.get('tone',{}).get('srgbLinearization',False) else rgb)*255).astype(np.uint8))
+    intended=Image.fromarray(np.round((to_srgb(linear) if 'tone' in cfg else rgb)*255).astype(np.uint8))
     modeled=Image.fromarray(np.round(display*255).astype(np.uint8))
     alpha=Image.fromarray(np.uint8(valid)*255)
     intended.putalpha(alpha);modeled.putalpha(alpha)

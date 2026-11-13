@@ -139,6 +139,16 @@ class WorkflowTests(unittest.TestCase):
             self.assertGreater(pixels[50,29,0],100)
         renderer=Renderer(plan)
         self.assertLess(len(renderer.candidates()),renderer.geometry.n//32//4)
+        # Every active cell's nearest spiral turn must survive polar culling,
+        # including isolated marks on both sides of the angular wrap.
+        gy,gx=np.nonzero(renderer.grid)
+        x=renderer.xmin+(gx+.5)*renderer.micro;y=renderer.ymax-(gy+.5)*renderer.micro
+        g=renderer.geometry;rr=np.hypot(x,y);theta=np.arctan2(y,x)
+        turns=np.round((g.angle0-(rr-g.ri)/g.b-theta)/(2*np.pi))
+        nearest=g.ri+g.b*(g.angle0-theta-2*np.pi*turns)
+        good=(nearest>=g.ri)&(nearest<g.ro)
+        clusters=np.floor(g.bits_at_radius(nearest[good])/CHANNEL_BITS_PER_RUB).astype(int)
+        self.assertTrue(np.isin(clusters,renderer.candidates()).all())
         # Compare angular culling with brute-force nominal positions on actual
         # clusters. Export must not omit any written dots in the bottom design.
         for cluster in renderer.candidates()[::max(1,len(renderer.candidates())//5)]:
@@ -162,6 +172,20 @@ class WorkflowTests(unittest.TestCase):
                 actual=allocate(np.array([0,1]),np.array([1-gray/255.,gray/255.]),samples,strength)
                 native=gray >= 128 + strength*255*(phase(samples)-.5)
                 np.testing.assert_array_equal(actual,native.astype(int))
+
+    def test_09_native_tone_density_is_not_linearized_again(self):
+        # These bytes are the native AdjustedGray outputs for source gray 128:
+        # 128 without gamma, 55 with gamma. The latter must stay darker.
+        values=[]
+        for gamma,gray in ((False,128),(True,55)):
+            source=self.root/f'prepared-tone-{gamma}.png'
+            Image.new('RGB',(24,24),(gray,gray,gray)).save(source)
+            request=self.request(f'tone-{gamma}')
+            request['inputPath']=str(source)
+            request['configuration']['tone']={'ditherStrength':1.,'brightness':0.,'srgbLinearization':gamma}
+            with contextlib.redirect_stdout(io.StringIO()):plan=worker.execute(request)
+            with Image.open(Path(plan).parent/'target.png') as im:values.append(im.getpixel((2,2))[0])
+        self.assertEqual(values,[188,128])
 
 
 if __name__ == '__main__':

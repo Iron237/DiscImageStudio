@@ -44,6 +44,26 @@ class Renderer:
         if ax0<=0<=ax1 and ay0<=0<=ay1: self.halfangle=math.pi
         self.rmin=math.hypot(max(ax0,-ax1,0),max(ay0,-ay1,0))
         self.rmax=max(math.hypot(x,y)for x in (ax0,ax1)for y in (ay0,ay1))
+        self.occupancy=None
+        if 0<len(active[0])<100000:
+            # A full-disc grid may contain a few distant marks (including edge
+            # antialiasing). Their common bounding box would span the whole disc.
+            # Conservatively rasterize dot footprints into a coarse polar mask.
+            self.radial_step=.5;self.angular_bins=720
+            self.angular_step=2*math.pi/self.angular_bins
+            rows=math.ceil((self.geometry.ro+p['macrocellMm'])/self.radial_step)+3
+            occupancy=np.zeros((rows,self.angular_bins),bool)
+            xx=self.xmin+(active[1]+.5)*self.micro;yy=self.ymax-(active[0]+.5)*self.micro
+            rr=np.hypot(xx,yy);radial=np.floor(rr/self.radial_step).astype(int)
+            angular=np.floor(np.arctan2(yy,xx)/self.angular_step).astype(int)
+            half_diagonal=self.micro/math.sqrt(2)
+            radial_padding=math.ceil(half_diagonal/self.radial_step)
+            angular_padding=math.ceil(math.asin(min(1,half_diagonal/max(float(rr.min()),half_diagonal)))/self.angular_step)
+            for dr in range(-radial_padding,radial_padding+1):
+                for da in range(-angular_padding,angular_padding+1):
+                    occupancy[(radial+dr).clip(0,rows-1),(angular+da)%self.angular_bins]=True
+            doubled=np.tile(occupancy,(1,2))
+            self.occupancy=np.pad(np.cumsum(doubled,axis=1,dtype=np.int32),((0,0),(1,0)))
         self.offsets,self.ecc_index=payload_layout();self.order=np.argsort(self.offsets);self.sorted_offsets=self.offsets[self.order]
         self.motifs=[None if t['qHex'] is None else np.frombuffer(bytes.fromhex(t['qHex']),dtype=np.uint8)for t in self.plan['textures']]
         self.maskbank=None
@@ -59,6 +79,16 @@ class Renderer:
         rs,aa=self.geometry.polar_at_bits(np.arange(clusters+1)*CHANNEL_BITS_PER_RUB)
         distance=np.abs(np.remainder((aa[:-1]+aa[1:])/2-self.center_angle+math.pi,2*math.pi)-math.pi)
         ok=(rs[1:]>=self.rmin)&(rs[:-1]<=self.rmax)&(distance<=(aa[:-1]-aa[1:])/2+self.halfangle+1e-8)
+        if self.occupancy is not None:
+            start=np.floor(aa[1:]/self.angular_step).astype(np.int64)%self.angular_bins
+            span=np.minimum(self.angular_bins,np.ceil((aa[:-1]-aa[1:])/self.angular_step).astype(int)+2)
+            occupied=np.zeros(clusters,bool)
+            # Include both radial endpoints and a guard bin for track/bin ties.
+            for radial in (np.floor(rs[:-1]/self.radial_step).astype(int),np.floor(rs[1:]/self.radial_step).astype(int)):
+                for dr in (-1,0,1):
+                    row=(radial+dr).clip(0,self.occupancy.shape[0]-1)
+                    occupied |= self.occupancy[row,start+span]>self.occupancy[row,start]
+            ok &= occupied
         return np.flatnonzero(ok)
 
     def patch_payload_indices(self,cluster):
