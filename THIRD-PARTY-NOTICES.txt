@@ -13,6 +13,16 @@ When updating dependencies or the bundled runtime, update these notices too.
 
 Components
 ----------
+- DiscColorStudio v0.8.5 (Neo-626), GPL-3.0:
+  https://github.com/Neo-626/DiscColorStudio at
+  ef44b13694e9873fc47ea9e0040ec5af502995ae. The unchanged measured angular
+  color data and DVD recipes are used in an isolated worker. Corresponding
+  source, modifications, GPL text and provenance are in third_party/DiscColorStudio.
+  The source table is for Verbatim 95058 DVD-R at 4x; transfer to 43533 is
+  experimental. No DVD measurements are represented as Blu-ray measurements.
+- The DVD color worker includes ILGPU / ILGPU.Algorithms 1.5.3, Copyright
+  2016-2025 ILGPU Project, Marcel Koester and contributors, under the NCSA
+  license. Complete upstream notices accompany the worker in its licenses folder.
 - BDColorLab 64099 v0.1: GPL-3.0-only numerical full-color experiment backend,
   adapted from the user-provided source archive. Complete corresponding source,
   license and upstream provenance are in src/DiscImageStudio.FullColor.Engine.

@@ -5,3 +5,5 @@
 *.slnx text eol=crlf
 *.png binary
 *.ico binary
+# Preserve whitespace in the pinned third-party sources and license texts.
+third_party/DiscColorStudio/** -whitespace

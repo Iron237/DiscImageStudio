@@ -49,7 +49,7 @@ Disc Image Studio 可将一张图片转换成符合 CD、DVD 与单层 BD-R 光�
 
 ## 快速开始
 
-本 fork 增加原生 **全彩** 工作流（威宝 64099 BD-R，实盘颜色未验证），支持模型预览、参数编辑、标定和 ISO 输出。首次使用请按[全彩工作流说明](docs/FULL_COLOR.md)安装独立数值运行环境。
+本 fork 增加原生 **全彩** 工作流：DVD-R 43533 试验接入 DiscColorStudio 的 95058／4× 实测角度混色；威宝 64099 BD-R 保留实验模型、标定和 ISO 输出。预览、参数编辑、导出及刻录均继承当前设计。43533 色表匹配和 BD 实盘颜色仍需验证。配置方法见[全彩工作流说明](docs/FULL_COLOR.md)。
 
 Windows x64 下载以 `win-x64.exe` 结尾的文件；Windows 11 ARM64 下载以 `win-arm64.exe` 结尾的原生版本，均可直接运行。Linux 或 macOS 请下载与 CPU 匹配的**实验性 CLI** 压缩包，解压后运行 `./disc-image-studio --help`。这些发布包均自带 .NET 运行时。 [GitHub Releases](https://github.com/JiaFeiMiao-K-Cat/DiscImageStudio/releases)
 

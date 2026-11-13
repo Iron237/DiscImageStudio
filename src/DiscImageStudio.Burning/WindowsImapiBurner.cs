@@ -345,6 +345,7 @@ public sealed class WindowsImapiBurner : IOpticalDiscBurner
             }
 
             ValidateRequestedMedia(request.MediaKind, recorder, format);
+            if (request.RequireDvdR) ValidateRequiredMedia(request, Convert.ToInt32(format.CurrentPhysicalMediaType));
             if (request.WriteSpeed is null)
             {
                 currentOperation = "选择最低刻录速度";
@@ -394,7 +395,11 @@ public sealed class WindowsImapiBurner : IOpticalDiscBurner
             BurnDeviceDiagnostics.Report(ReportDiagnostic, content.GetDiagnosticSummary);
             // Preparation may take time. Recheck the loaded medium before writing.
             currentOperation = "再次检查当前盘片兼容性";
-            try { ValidateRequestedMedia(request.MediaKind, recorder, format); }
+            try
+            {
+                ValidateRequestedMedia(request.MediaKind, recorder, format);
+                if (request.RequireDvdR) ValidateRequiredMedia(request, Convert.ToInt32(format.CurrentPhysicalMediaType));
+            }
             catch (Exception exception)
             {
                 try { exception.Data["Burn.ContentAtFailure"] = content.GetDiagnosticSummary(); } catch { }
@@ -1360,6 +1365,12 @@ public sealed class WindowsImapiBurner : IOpticalDiscBurner
                 ? "CD DAO 子通道格式：Raw P-W（IMAPI 类型 3）"
                 : "CD DAO 子通道格式：Cooked R-W（IMAPI 类型 2）")
             + $"；光驱报告支持：{FormatSectorTypes(supportedSectorTypes)}。";
+
+    internal static void ValidateRequiredMedia(OpticalBurnRequest request, int physicalMediaType)
+    {
+        if (request.RequireDvdR && physicalMediaType != 9)
+            throw new InvalidOperationException("DVD 全彩需要空白单层 DVD-R，不能使用 DVD+R、DVD-RW 或其他盘型。");
+    }
 
     private static string FormatSectorTypes(IReadOnlyCollection<int> sectorTypes)
         => sectorTypes.Count == 0 ? "无" : string.Join(", ", sectorTypes);

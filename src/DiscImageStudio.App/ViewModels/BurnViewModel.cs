@@ -1,5 +1,6 @@
 using DiscImageStudio.Localization;
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -276,7 +277,7 @@ public partial class BurnViewModel : ObservableObject
                 identity = $"calibration:{target.Id}:{p}:{_shell.Calibration.CdInterleave}";
             }
         }
-        else if (IsBluRayBurn && _shell.FullColor.UseForExport)
+        else if ((IsBluRayBurn || IsDvdBurn) && _shell.FullColor.UseForExport)
         {
             SourceTitle = L.T("FullColor.Title");
             SourceDetails = _shell.FullColor.PreviewState + " · " + L.T("FullColor.ExportBeforeBurn");
@@ -550,7 +551,7 @@ public partial class BurnViewModel : ObservableObject
             bool dvd = IsDvdBurn;
             bool bluRay = IsBluRayBurn;
             bool calibration = UseCalibrationPattern;
-            string? fullColorIso = !calibration && bluRay && _shell.FullColor.UseForExport
+            string? fullColorIso = !calibration && (bluRay || dvd) && _shell.FullColor.UseForExport
                 ? _shell.FullColor.RequireCurrentIso() : null;
             int preparationRevision = _burnPreparationRevision;
             OpticalBurnMediaKind mediaKind = CurrentMediaKind;
@@ -564,15 +565,12 @@ public partial class BurnViewModel : ObservableObject
             {
                 if (_shell.FullColor.RequireCurrentIso() != fullColorIso)
                     throw new InvalidOperationException(L.T("FullColor.Stale"));
-                if (capacity.WritableSectors < BluRayDiscParameters.SectorsPerLayer)
+                long colorLength = new FileInfo(fullColorIso).Length;
+                if (capacity.WritableSectors < colorLength / 2048)
                     throw new ArgumentException(L.T("FullColor.Capacity"));
-                request = new OpticalBurnRequest(device.Id, OpticalBurnMediaKind.BluRayData,
-                    25025314816L, (output, token) =>
-                    {
-                        using FileStream source = new(fullColorIso, FileMode.Open, FileAccess.Read, FileShare.Read);
-                        source.CopyToAsync(output, 1024 * 1024, token).GetAwaiter().GetResult();
-                    }, selectedWriteSpeed.Speed);
-                contentDescription = L.T("FullColor.Title") + " · " + Path.GetFileName(fullColorIso) + " · 25.03 GB";
+                request = CreateFullColorBurnRequest(device.Id, fullColorIso, bluRay, selectedWriteSpeed.Speed);
+                contentDescription = L.T("FullColor.Title") + " · " + Path.GetFileName(fullColorIso) + " · "
+                    + (colorLength / 1_000_000_000.0).ToString("F2", CultureInfo.CurrentCulture) + " GB";
             }
             else if (calibration)
             {
@@ -796,6 +794,14 @@ public partial class BurnViewModel : ObservableObject
     }
 
     // Build the layout before physical writing and capture all generation options.
+    internal static OpticalBurnRequest CreateFullColorBurnRequest(string deviceId, string image, bool bluRay, OpticalWriteSpeed? speed)
+        => new(deviceId, bluRay ? OpticalBurnMediaKind.BluRayData : OpticalBurnMediaKind.DvdData,
+            new FileInfo(image).Length, (output, token) =>
+            {
+                using FileStream source = new(image, FileMode.Open, FileAccess.Read, FileShare.Read);
+                source.CopyToAsync(output, 1024 * 1024, token).GetAwaiter().GetResult();
+            }, speed) { RequireDvdR = !bluRay };
+
     internal static OpticalBurnRequest CreateCdBurnRequest(
         string imagePath,
         CdDiscParameters parameters,

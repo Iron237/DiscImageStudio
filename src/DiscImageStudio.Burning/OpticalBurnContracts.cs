@@ -91,6 +91,8 @@ public sealed record OpticalBurnRequest(
     OpticalWriteSpeed? WriteSpeed = null,
     OpticalBurnBufferOptions? BufferOptions = null)
 {
+    public bool RequireDvdR { get; init; }
+
     public OpticalBurnBufferOptions EffectiveBufferOptions => BufferOptions
         ?? (MediaKind == OpticalBurnMediaKind.BluRayData
             ? OpticalBurnBufferOptions.BluRayDefault : OpticalBurnBufferOptions.Default);
@@ -99,6 +101,8 @@ public sealed record OpticalBurnRequest(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(DeviceId);
         ArgumentNullException.ThrowIfNull(ProduceContent);
+        if (RequireDvdR && MediaKind != OpticalBurnMediaKind.DvdData)
+            throw new ArgumentException("DVD-R-only recording requires DVD data sectors.");
         int sectorBytes = OpticalBurnMedia.GetSectorBytes(MediaKind);
         if (ContentLength <= 0 || ContentLength % sectorBytes != 0)
         {

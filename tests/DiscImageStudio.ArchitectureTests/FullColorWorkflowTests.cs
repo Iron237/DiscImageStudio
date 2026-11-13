@@ -13,21 +13,32 @@ internal static class FullColorWorkflowTests
 {
     // Read-only project replay for local diagnosis; never saves the source project
     // or invokes a recorder. The normal regression suite uses synthetic fixtures.
-    internal static void PreviewProject(string project, string output) => WpfTestHost.Run(() =>
+    internal static void PreviewProject(string project, string output, string? iso = null) => WpfTestHost.Run(() =>
     {
-        ShellViewModel shell = new(Dispatcher.CurrentDispatcher);
+        ShellViewModel shell = new(Dispatcher.CurrentDispatcher, new DiscImageStudio.Burning.WindowsImapiBurner(),
+            new DiscImageStudio.SnapshotOpticalDriveProbe("none"));
         try
         {
             shell.OpenProjectForSnapshot(project);
             var vm = shell.FullColor;
-            vm.PythonPath = Environment.GetEnvironmentVariable("DIS_TEST_FULLCOLOR_PYTHON")
-                ?? throw new ArgumentException("Set DIS_TEST_FULLCOLOR_PYTHON first.");
+            if (shell.CurrentProject?.IsBluRay == true)
+                vm.PythonPath = Environment.GetEnvironmentVariable("DIS_TEST_FULLCOLOR_PYTHON")
+                    ?? throw new ArgumentException("Set DIS_TEST_FULLCOLOR_PYTHON first.");
             vm.OutputRoot = Path.GetFullPath(output);
             if (Environment.GetEnvironmentVariable("DIS_TEST_FULLCOLOR_MACRO") is { } macro)
                 vm.Groups.SelectMany(g => g.Fields).Single(f => f.Path == "patch.macrocellMm").Value = macro;
             Pump(vm.PreviewCommand.ExecuteAsync(null), 600);
             Require(vm.IsPreviewCurrent && vm.Prediction is not null, "project replay produced a current prediction");
             Console.WriteLine("fullcolor-project-plan: " + Directory.GetFiles(vm.OutputRoot, "plan.json", SearchOption.AllDirectories).Order().Last());
+            if (iso is not null)
+            {
+                if (File.Exists(iso)) throw new IOException("Project replay does not overwrite an existing ISO.");
+                vm.AllowUnmeasured = true;
+                Task<bool> export = vm.ExportToAsync(iso);
+                Pump(export, 1800);
+                Require(export.Result && vm.RequireCurrentIso() == iso, "project replay exported a current full image");
+                Console.WriteLine("fullcolor-project-iso: " + iso);
+            }
         }
         finally
         {
@@ -225,11 +236,11 @@ internal static class FullColorWorkflowTests
     {
         if (!condition) throw new InvalidOperationException("Full Color: " + message);
     }
-    private static async Task WaitForIdle(ShellViewModel shell)
+    internal static async Task WaitForIdle(ShellViewModel shell)
     {
         while (shell.IsBusy) await Task.Delay(50);
     }
-    private static void Pump(Task task, int seconds = 180)
+    internal static void Pump(Task task, int seconds = 180)
     {
         DispatcherFrame frame = new();
         DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(seconds) };

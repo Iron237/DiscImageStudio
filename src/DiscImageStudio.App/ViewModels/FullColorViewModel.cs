@@ -47,6 +47,7 @@ public partial class FullColorViewModel : ObservableObject
     public FullColorViewModel(ShellViewModel shell)
     {
         _shell = shell;
+        InitializeDvdColor();
         Groups.Add(new("FullColor.Layout", [
             new("patch.macrocellMm", "FullColor.Macro", .25), new("patch.microcellMm", "FullColor.Micro", .05)]));
         Groups.Add(new("FullColor.CalibrationRegion", [
@@ -71,8 +72,8 @@ public partial class FullColorViewModel : ObservableObject
         BrowseOutputCommand = new RelayCommand(() => PickOutput(), () => CanEdit);
         PreviewCommand = new AsyncRelayCommand(() => PreviewAsync(false), () => CanEdit && HasDesignSource);
         CalibrationCommand = new AsyncRelayCommand(() => PreviewAsync(true), () => CanEdit && IsBluRayProject);
-        ExportCommand = new AsyncRelayCommand(ExportAsync, () => CanEdit && IsPreviewCurrent && _planPath is not null && IsBluRayProject);
-        UseExistingIsoCommand = new AsyncRelayCommand(PickExistingIsoAsync, () => CanEdit && IsPreviewCurrent && !_calibration && IsBluRayProject);
+        ExportCommand = new AsyncRelayCommand(ExportAsync, () => CanEdit && IsPreviewCurrent && _planPath is not null && IsSupportedColorProject);
+        UseExistingIsoCommand = new AsyncRelayCommand(PickExistingIsoAsync, () => CanEdit && IsPreviewCurrent && !_calibration && IsSupportedColorProject);
         SaveRecipeCommand = new RelayCommand(SaveRecipe, () => CanEdit);
         LoadRecipeCommand = new RelayCommand(LoadRecipe, () => CanEdit);
         OpenPlanCommand = new RelayCommand(OpenPlan, () => CanEdit);
@@ -105,7 +106,8 @@ public partial class FullColorViewModel : ObservableObject
                 OnPropertyChanged(nameof(ToneSummary));
             }
             else if (e.PropertyName == nameof(DiscParametersState.ToneSummary)) OnPropertyChanged(nameof(ToneSummary));
-            if (e.PropertyName?.StartsWith("Bd", StringComparison.Ordinal) == true && e.PropertyName != nameof(DiscParametersState.BdImagePath))
+            if ((e.PropertyName?.StartsWith("Bd", StringComparison.Ordinal) == true || e.PropertyName?.StartsWith("Dvd", StringComparison.Ordinal) == true)
+                && e.PropertyName != nameof(DiscParametersState.BdImagePath) && e.PropertyName != nameof(DiscParametersState.DvdImagePath))
                 RefreshDesignSource();
         };
         _shell.BusyChanged += NotifyCommands;
@@ -114,8 +116,8 @@ public partial class FullColorViewModel : ObservableObject
     private IEnumerable<FullColorField> Fields => Groups.SelectMany(group => group.Fields);
     public bool CanEdit => !_shell.IsBusy && !_preparing;
     public bool IsBluRayProject => _shell.IsProjectOpen && _shell.CurrentProject?.IsBluRay == true;
-    public bool HasDesignSource => IsBluRayProject && _shell.Design.HasLayers;
-    public string SourceSummary => !IsBluRayProject ? L.T("FullColor.NeedProject")
+    public bool HasDesignSource => IsSupportedColorProject && _shell.Design.HasLayers;
+    public string SourceSummary => !IsSupportedColorProject ? L.T("FullColor.NeedProject")
         : !HasDesignSource ? L.T("请先在设计页导入图片。")
         : L.F($"设计页合成图源（{DiscImageStudio.Imaging.RingImageQuality.GenerationSize} px）") + " · " + _shell.CurrentProject!.Name;
     public string ToneSummary => _shell.State.ToneSummary;
@@ -166,9 +168,10 @@ public partial class FullColorViewModel : ObservableObject
         OnPropertyChanged(nameof(HasDesignSource));
         OnPropertyChanged(nameof(IsBluRayProject));
         OnPropertyChanged(nameof(SourceSummary));
+        RefreshDvdBindings();
         if (IsPreviewCurrent)
         {
-            try { if (_planSignature != Signature() || !IsBluRayProject) InvalidatePreview(); }
+            try { if (_planSignature != Signature() || !IsSupportedColorProject) InvalidatePreview(); }
             catch (Exception e) when (e is ArgumentException or InvalidOperationException or NotSupportedException) { InvalidatePreview(); }
         }
         NotifyCommands();
@@ -179,6 +182,9 @@ public partial class FullColorViewModel : ObservableObject
         OnPropertyChanged(nameof(SourceSummary));
         foreach (FullColorField field in Fields) field.Relocalize();
         foreach (FullColorGroup group in Groups) group.Relocalize();
+        foreach (FullColorField field in DvdFields) field.Relocalize();
+        foreach (FullColorGroup group in DvdGroups) group.Relocalize();
+        RefreshDvdBindings();
     }
     private void NotifyCommands()
     {
@@ -200,6 +206,7 @@ public partial class FullColorViewModel : ObservableObject
 
     internal JsonObject BuildConfiguration()
     {
+        if (IsDvdProject) return BuildDvdConfiguration();
         JsonObject cfg = JsonNode.Parse(File.ReadAllText(Path.Combine(FullColorEngine.EngineDirectory,
             "configs", "verbatim_64099.json")))!.AsObject();
         foreach (FullColorField field in Fields)
@@ -248,6 +255,7 @@ public partial class FullColorViewModel : ObservableObject
     }
     private string Signature()
     {
+        if (IsDvdProject) return BuildDvdConfiguration().ToJsonString() + "|" + DesignFingerprint();
         string Stamp(string path) => File.Exists(path) ? path + ":" + new FileInfo(path).Length + ":" + File.GetLastWriteTimeUtc(path).Ticks : path;
         return string.Join('|', Fields.Select(f => f.Value)) + "|" + DesignFingerprint() + "|" + Stamp(MeasurementsPath);
     }
@@ -257,10 +265,12 @@ public partial class FullColorViewModel : ObservableObject
         string source = JsonSerializer.Serialize(new
         {
             Project = _shell.ProjectFilePath, Family = _shell.Design.Family,
-            DataDirectory = _shell.State.BdDataDirectory,
+            DataDirectory = IsDvdProject ? _shell.State.DvdDataDirectory : _shell.State.BdDataDirectory,
             Radius = _shell.Design.CanvasOuterRadiusMm,
-            Pipeline = "dis-bd-color-v2", Tone = _shell.State.BluRayTone,
-            Geometry = new[] { _shell.State.BdInnerRadius, _shell.State.BdOuterRadius, _shell.State.BdTotalSectors,
+            Pipeline = IsDvdProject ? "dcs-dvd-measured-v1" : "dis-bd-color-v2", Tone = IsDvdProject ? _shell.State.DvdTone : _shell.State.BluRayTone,
+            Geometry = IsDvdProject ? new[] { _shell.State.DvdInnerRadius, _shell.State.DvdOuterRadius, _shell.State.DvdTotalSectors,
+                _shell.State.DvdUsableSectors, _shell.State.DvdPitchLinear, _shell.State.DvdPitchQuadratic, _shell.State.DvdPitchCubic }
+                : new[] { _shell.State.BdInnerRadius, _shell.State.BdOuterRadius, _shell.State.BdTotalSectors,
                 _shell.State.BdUsableSectors, _shell.State.BdPitchLinear, _shell.State.BdPitchQuadratic, _shell.State.BdPitchCubic },
             Layers = _shell.Design.CaptureLayers().Select(layer => new { Image = Stamp(layer.ImagePath), layer.Visible,
                 layer.TranslateXMm, layer.TranslateYMm, layer.RotationDeg, layer.Scale }),
@@ -269,6 +279,7 @@ public partial class FullColorViewModel : ObservableObject
     }
     private void RequireProjectGeometry()
     {
+        if (IsDvdProject) { RequireDvdGeometry(); return; }
         if (!IsBluRayProject) throw new InvalidOperationException(L.T("FullColor.NeedProject"));
         BluRayDiscParameters preset = BluRayDiscPreset.Find("bd-r-verbatim-64099").CreateParameters();
         DiscParametersState s = _shell.State;
@@ -283,6 +294,7 @@ public partial class FullColorViewModel : ObservableObject
 
     private async Task PreviewAsync(bool calibration)
     {
+        if (IsDvdProject && !calibration) { await PreviewDvdAsync(); return; }
         try
         {
             RequireProjectGeometry();
@@ -321,6 +333,7 @@ public partial class FullColorViewModel : ObservableObject
     internal void LoadPlan(string path, bool applyConfiguration)
     {
         JsonObject plan = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        if (plan["schema"]?.GetValue<string>() == DvdPlanSchema) { LoadDvdPlan(path, applyConfiguration); return; }
         if (plan["schema"]?.GetValue<string>() != "bdcolor-plan-v1") throw new ArgumentException("Unsupported full-color plan.");
         if (!IsBluRayProject || plan["designSource"]?["fingerprint"]?.GetValue<string>() != DesignFingerprint())
             throw new ArgumentException(L.T("FullColor.WrongDesign"));
@@ -346,7 +359,7 @@ public partial class FullColorViewModel : ObservableObject
     {
         try
         {
-            string? output = _shell.Dialogs?.PickSave("BD-R ISO|*.iso", ".iso", _calibration ? "palette-64099.iso" : "fullcolor-64099.iso");
+            string? output = _shell.Dialogs?.PickSave("Full Color ISO|*.iso", ".iso", IsDvdProject ? "fullcolor-43533.iso" : _calibration ? "palette-64099.iso" : "fullcolor-64099.iso");
             if (output is null) return;
             // SaveFileDialog has already obtained overwrite confirmation.
             await ExportToAsync(output, overwriteConfirmed: File.Exists(output));
@@ -356,6 +369,7 @@ public partial class FullColorViewModel : ObservableObject
 
     internal async Task<bool> ExportToAsync(string output, bool overwriteConfirmed = false)
     {
+            if (IsDvdProject) return await ExportDvdAsync(output, overwriteConfirmed);
             RequireProjectGeometry();
             if (!IsPreviewCurrent || _planPath is null || _planSignature != Signature())
             {
@@ -386,7 +400,7 @@ public partial class FullColorViewModel : ObservableObject
     {
         try
         {
-            if (_shell.Dialogs?.PickOpen(L.T("FullColor.UseExistingIso"), "BD-R ISO|*.iso") is { } path)
+            if (_shell.Dialogs?.PickOpen(L.T("FullColor.UseExistingIso"), "Full Color ISO|*.iso") is { } path)
                 await UseExistingIsoAsync(path);
         }
         catch (Exception e) { ShowError(e); }
@@ -403,7 +417,8 @@ public partial class FullColorViewModel : ObservableObject
         JsonObject request = new() { ["operation"] = "verify-iso", ["directory"] = Path.GetDirectoryName(_planPath),
             ["workRoot"] = Path.GetFullPath(OutputRoot), ["planPath"] = _planPath, ["outputPath"] = image };
         bool success = await _shell.RunImageJobAsync(L.T("FullColor.VerifyIso"), image,
-            (progress, token) => _engine.Run(PythonPath, request, image, progress, token), canPreviewOutput: false);
+            (progress, token) => IsDvdProject ? _dvdEngine.Run(request, image, progress, token)
+                : _engine.Run(PythonPath, request, image, progress, token), canPreviewOutput: false);
         if (success && signature == Signature())
         {
             _isoPath = image;
@@ -418,8 +433,9 @@ public partial class FullColorViewModel : ObservableObject
     internal string RequireCurrentIso()
     {
         RequireProjectGeometry();
+        if (IsDvdProject && !AllowUnmeasured) throw new InvalidOperationException(L.T("FullColor.DvdAcceptRequired"));
         if (!IsPreviewCurrent || _isoSignature != Signature() || _isoPath is null || !File.Exists(_isoPath)
-            || new FileInfo(_isoPath).Length != 25025314816L)
+            || new FileInfo(_isoPath).Length != ExpectedColorIsoBytes)
             throw new InvalidOperationException(L.T("FullColor.ExportBeforeBurn"));
         return _isoPath;
     }
@@ -428,7 +444,7 @@ public partial class FullColorViewModel : ObservableObject
     {
         try
         {
-            JsonObject recipe = new() { ["schema"] = "dis-fullcolor-workflow-v1", ["configuration"] = BuildConfiguration(),
+            JsonObject recipe = new() { ["schema"] = IsDvdProject ? "dis-dvd-fullcolor-recipe-v1" : "dis-fullcolor-workflow-v1", ["configuration"] = BuildConfiguration(),
                 ["measurementsPath"] = MeasurementsPath, ["outputRoot"] = OutputRoot,
                 ["pythonPath"] = PythonPath };
             if (_shell.Dialogs?.PickSave("Full Color JSON|*.bdcolor.json", ".bdcolor.json", "fullcolor.bdcolor.json") is { } p)
@@ -442,8 +458,9 @@ public partial class FullColorViewModel : ObservableObject
         try
         {
             JsonNode recipe = JsonNode.Parse(File.ReadAllText(p))!;
-            if (recipe["schema"]?.GetValue<string>() != "dis-fullcolor-workflow-v1") throw new ArgumentException("Unsupported full-color recipe.");
-            ApplyConfiguration(recipe["configuration"]!);
+            string expectedSchema = IsDvdProject ? "dis-dvd-fullcolor-recipe-v1" : "dis-fullcolor-workflow-v1";
+            if (recipe["schema"]?.GetValue<string>() != expectedSchema) throw new ArgumentException("Unsupported full-color recipe for this disc family.");
+            if (IsDvdProject) ApplyDvdConfiguration(recipe["configuration"]!); else ApplyConfiguration(recipe["configuration"]!);
             MeasurementsPath = recipe["measurementsPath"]?.GetValue<string>() ?? string.Empty;
             OutputRoot = recipe["outputRoot"]?.GetValue<string>() ?? OutputRoot;
             // Loading a recipe never selects an executable from that document.
@@ -453,6 +470,7 @@ public partial class FullColorViewModel : ObservableObject
     }
     private void Reset()
     {
+        if (IsDvdProject) { ResetDvdSettings(); return; }
         try { ApplyConfiguration(JsonNode.Parse(File.ReadAllText(Path.Combine(FullColorEngine.EngineDirectory, "configs", "verbatim_64099.json")))!); }
         catch (Exception e) { ShowError(e); }
     }

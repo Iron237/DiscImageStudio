@@ -186,7 +186,7 @@ public partial class ExportViewModel : ObservableObject
         }
 
         int layerCount = _design.Layers.Count;
-        SourceSummary = IsBluRay && FullColor.UseForExport
+        SourceSummary = (IsBluRay || IsDvd) && FullColor.UseForExport
             ? L.T("FullColor.Title") + " · " + FullColor.PreviewState
             : layerCount == 0
             ? L.T("请先在设计页导入图片。")
@@ -198,9 +198,9 @@ public partial class ExportViewModel : ObservableObject
     {
         try
         {
-            if (IsBluRay && FullColor.UseForExport)
+            if ((IsBluRay || IsDvd) && FullColor.UseForExport)
             {
-                await FullColor.ExportToAsync(_state.BdOutputPath);
+                await FullColor.ExportToAsync(IsBluRay ? _state.BdOutputPath : _state.DvdOutputPath);
                 return;
             }
             // The composite renders here at export quality even when the design page has not

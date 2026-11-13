@@ -7,6 +7,7 @@ on:
     paths:
       - 'src/DiscImageStudio.App/**'
       - 'src/DiscImageStudio.Burning/**'
+      - 'third_party/DiscColorStudio/**'
       - 'src/DiscImageStudio.FullColor.Engine/**'
       - 'tests/DiscImageStudio.ArchitectureTests/**'
       - '.github/workflows/fullcolor.yml'
@@ -46,6 +47,7 @@ jobs:
           $env:DIS_TEST_FULLCOLOR_PYTHON = (Get-Command python).Source
           if ((Get-PSDrive -Name C).Free -gt 26GB) { $env:DIS_TEST_FULLCOLOR_FULL_ISO = '1' }
           else { Write-Output 'Full-size ISO test needs 26 GB free; testing native preview and encoded fragments on this runner.' }
+          if ((Get-PSDrive -Name C).Free -gt 12GB) { $env:DIS_TEST_DVD_COLOR_FULL_ISO = '1' }
           dotnet run --project tests/DiscImageStudio.ArchitectureTests -c Release --no-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check the development app directory and color engine
@@ -57,6 +59,8 @@ jobs:
           if (-not (Test-Path "$app/FullColorEngine/bdcolor/parallel.py")) { throw 'CPU scheduler missing from build output' }
           if (-not (Test-Path "$app/FullColorEngine/bdcolor/solve.py")) { throw 'Parallel solver missing from build output' }
           if (-not (Test-Path "$app/FullColorEngine/bdcolor/storage.py")) { throw 'Recoverable export storage missing from build output' }
+          if (-not (Test-Path "$app/DvdColorWorker/DiscColorStudio.exe")) { throw 'DVD measured-color worker missing from build output' }
+          if (-not (Test-Path "$app/DvdColorWorker/data/continuous-color-lut.bin.gz")) { throw 'DVD measured angular LUT missing from build output' }
           if (-not (Test-Path "$app/FullColorEngine/configs/verbatim_64099.json")) { throw 'Color configuration missing from build output' }
       - uses: actions/upload-artifact@v4
         with:

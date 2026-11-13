@@ -16,9 +16,21 @@ if (args is ["--preview-fullcolor-project", var colorProject, var colorOutput])
     return;
 }
 
+if (args is ["--export-fullcolor-project", var exportProject, var exportDirectory, var colorIso])
+{
+    FullColorWorkflowTests.PreviewProject(exportProject, exportDirectory, colorIso);
+    return;
+}
+
 if (args is ["--test-fullcolor"])
 {
     FullColorWorkflowTests.Run();
+    return;
+}
+
+if (args is ["--test-dvd-fullcolor"])
+{
+    DvdColorWorkflowTests.Run();
     return;
 }
 
@@ -166,6 +178,7 @@ Throws<ArgumentException>(
 Throws<ArgumentException>(() => catalog.Resolve("unknown-command"), "unknown command rejection");
 MaximizedWindowBoundsTests.Run();
 FullColorWorkflowTests.Run();
+DvdColorWorkflowTests.Run();
 WindowWorkAreaNativeTests.Run();
 BluRayModuleTests.Run();
 BluRayEncodingTests.Run();

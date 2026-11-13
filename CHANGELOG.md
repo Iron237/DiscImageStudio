@@ -4,6 +4,7 @@
 
 ### 中文
 
+- DIS「全彩」支持 DVD-R 43533 试验：继承设计页图层和当前几何，接入固定版本 DiscColorStudio 的 95058／4× 实测角度色表、连续配方和轨道混色；支持预览、参数编辑、完整 ISO、SHA-256 复用及现有导出/刻录流程。43533 实盘颜色匹配尚未验证，刻录限单层 DVD-R。DVD 计算组件随开发目录自动部署。
 - 修复光驱信息轮询与刻录可能重叠的竞态：所有 IMAPI 原生 STA 任务共用进程内调度锁，取消轮询后仍等待已发出的设备命令返回，再开始刻录。离线测试复现并验证竞争已消除；LBA 0 写入超时的实盘结果仍待复测。
 - 全彩页增加「使用已有 ISO」：按当前计划、完整容量和采样簇校验已有镜像，重启后可重新用于刻录，无需再次导出。错计划、未完成文件和诊断片段不会恢复刻录资格。
 - 修复同名全彩导出的文件提交：确认覆盖后保留旧 ISO 直至新镜像生成并抽样校验完成；检查点使用唯一临时文件和 Windows 占用重试，加入单写入锁与可恢复的最终发布，避免替换失败后丢失续算能力。
@@ -20,6 +21,7 @@
 
 ### English
 
+- Add a DVD-R 43533 trial to native Full Color using inherited design layers/geometry and pinned DiscColorStudio measured 95058/4x angular recipes and track mixing. Include previews, editable parameters, full ISO generation, SHA-256 reuse and existing export/burn workspaces. Color transfer to 43533 remains physically unverified; recording requires single-layer DVD-R. Deploy the DVD worker with the development app.
 - Serialize sidebar probes and burns across native IMAPI STA tasks. Cancelling a probe now retains native ownership until an in-flight device call returns. Offline tests reproduce and eliminate the overlap; the reported first-WRITE timeout still needs a physical retest.
 - Add Use existing ISO to Full Color: verify a completed image against the current plan, capacity and sampled clusters before reusing it after restart, without another export. Reject mismatched plans, partials and diagnostic fragments.
 - Fix same-name Full Color commits: retain an existing ISO until its confirmed replacement is complete and sample-verified. Use unique checkpoint temporaries, Windows sharing retries, a single output owner and recoverable final publication.

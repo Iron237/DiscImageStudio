@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <ShouldUnsetParentConfigurationAndPlatform>false</ShouldUnsetParentConfigurationAndPlatform>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -39,6 +40,7 @@
     <ProjectReference Include="..\DiscImageStudio.Cd\DiscImageStudio.Cd.csproj" />
     <ProjectReference Include="..\DiscImageStudio.Dvd\DiscImageStudio.Dvd.csproj" />
     <ProjectReference Include="..\DiscImageStudio.BluRay\DiscImageStudio.BluRay.csproj" />
+    <ProjectReference Include="..\..\third_party\DiscColorStudio\src\DiscColorStudio\DiscColorStudio.csproj" ReferenceOutputAssembly="false" Private="false" AdditionalProperties="Configuration=$(Configuration)" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\Fonts\HarmonyOS_Sans_SC_Regular.ttf" />
@@ -59,6 +61,25 @@
     <EmbeddedResource Include="..\..\THIRD-PARTY-NOTICES.txt" LogicalName="DiscImageStudio.Licenses.ThirdParty" />
     <EmbeddedResource Include="Assets\Fonts\HarmonyOS-Sans-LICENSE.txt" LogicalName="DiscImageStudio.Licenses.HarmonyOS" />
   </ItemGroup>
+  <Target Name="CopyDvdColorWorker" AfterTargets="Build">
+    <MSBuild Projects="$(MSBuildProjectDirectory)/../../third_party/DiscColorStudio/src/DiscColorStudio/DiscColorStudio.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration);ArtifactsPath=$(ArtifactsPath)">
+      <Output TaskParameter="TargetOutputs" ItemName="_DvdColorWorkerAssembly" />
+    </MSBuild>
+    <PropertyGroup><_DvdColorWorkerRoot>@(_DvdColorWorkerAssembly->'%(RootDir)%(Directory)')</_DvdColorWorkerRoot></PropertyGroup>
+    <ItemGroup>
+      <_DvdColorWorkerFile Include="$(_DvdColorWorkerRoot)**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_DvdColorWorkerFile)" DestinationFiles="@(_DvdColorWorkerFile->'$(OutDir)DvdColorWorker/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="ExposeDvdColorWorkerContent" BeforeTargets="GetCopyToOutputDirectoryItems" DependsOnTargets="CopyDvdColorWorker">
+    <ItemGroup>
+      <ContentWithTargetPath Include="@(_DvdColorWorkerFile)">
+        <TargetPath>DvdColorWorker/%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ContentWithTargetPath>
+    </ItemGroup>
+  </Target>
   <Target Name="RejectInvariantGlobalizationForWpf" BeforeTargets="PrepareForBuild"
           Condition="'$(InvariantGlobalization)' == 'true'">
     <Error Text="DiscImageStudio.App cannot use invariant globalization because WPF font rendering requires named cultures." />

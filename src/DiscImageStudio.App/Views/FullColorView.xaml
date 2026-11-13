@@ -5,10 +5,11 @@
              xmlns:vm="clr-namespace:DiscImageStudio.ViewModels"
              xmlns:controls="clr-namespace:DiscImageStudio.Controls"
              SizeChanged="View_SizeChanged">
+    <UserControl.Resources><BooleanToVisibilityConverter x:Key="ColorVisible" /></UserControl.Resources>
     <ScrollViewer controls:ScrollMaskBehavior.Enabled="True">
         <StackPanel Margin="{StaticResource PagePadding}">
-            <controls:PageHeader Title="{loc:Text FullColor.Title}" Badge="BD-R · 64099"
-                                 Workspace="{x:Static vm:Workspace.FullColor}" Hint="{loc:Text FullColor.Warning}">
+            <controls:PageHeader Title="{loc:Text FullColor.Title}" Badge="{Binding MediaBadge}"
+                                 Workspace="{x:Static vm:Workspace.FullColor}" Hint="{Binding ColorWarning}">
                 <controls:PageHeader.Actions>
                     <StackPanel Orientation="Horizontal">
                         <Button Style="{StaticResource CompactButton}" Content="{loc:Text FullColor.BackDesign}" Command="{Binding NavigateCommand}"
@@ -18,7 +19,7 @@
                     </StackPanel>
                 </controls:PageHeader.Actions>
             </controls:PageHeader>
-            <TextBlock Text="{loc:Text FullColor.Warning}" Style="{StaticResource HintText}"
+            <TextBlock Text="{Binding ColorWarning}" Style="{StaticResource HintText}"
                        Foreground="{DynamicResource WarningBrush}" Margin="0,0,0,16" TextWrapping="Wrap" />
             <Grid x:Name="LayoutGrid">
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
@@ -33,11 +34,11 @@
                                 </controls:SourceChip.Actions>
                             </controls:SourceChip>
                             <Image Source="{Binding InputPreview}" Height="150" Stretch="Uniform" Margin="0,10,0,0" />
-                            <TextBlock Text="{loc:Text FullColor.DesignInputHint}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0" />
-                            <TextBlock Text="{Binding ToneSummary}" Style="{StaticResource CompactHint}" Margin="0,6,0,0" />
+                            <TextBlock Text="{Binding ColorDesignHint}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                            <TextBlock Text="{Binding ColorToneSummary}" Style="{StaticResource CompactHint}" Margin="0,6,0,0" />
                             <WrapPanel Margin="0,12,0,0">
                                 <Button Content="{loc:Text FullColor.Generate}" Command="{Binding PreviewCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" />
-                                <Button Content="{loc:Text FullColor.Calibration}" Command="{Binding CalibrationCommand}" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" />
+                                <Button Content="{loc:Text FullColor.Calibration}" Command="{Binding CalibrationCommand}" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" Visibility="{Binding IsBluRayProject, Converter={StaticResource ColorVisible}}" />
                                 <Button Content="{loc:Text FullColor.OpenPlan}" Command="{Binding OpenPlanCommand}" Style="{StaticResource SecondaryButton}" Margin="0,0,0,8" />
                             </WrapPanel>
                         </StackPanel>
@@ -58,7 +59,8 @@
                                     </Border>
                                 </StackPanel>
                             </UniformGrid>
-                            <Expander Header="{loc:Text FullColor.Diagnostics}" Style="{StaticResource CardExpander}" Margin="0,10,0,0">
+                            <TextBlock Text="{Binding DvdViewingSummary}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="6,10,6,0" Visibility="{Binding IsDvdProject, Converter={StaticResource ColorVisible}}" />
+                            <Expander Header="{loc:Text FullColor.Diagnostics}" Style="{StaticResource CardExpander}" Margin="0,10,0,0" Visibility="{Binding IsBluRayProject, Converter={StaticResource ColorVisible}}">
                                 <UniformGrid Columns="2" Margin="0,8,0,0">
                                     <StackPanel Margin="6"><TextBlock Text="{loc:Text FullColor.Original}" Style="{StaticResource FieldLabel}" />
                                         <Image Source="{Binding InputPreview}" Height="180" Stretch="Uniform" /></StackPanel>
@@ -76,14 +78,14 @@
                         <StackPanel>
                             <StackPanel IsEnabled="{Binding CanEdit}">
                                 <controls:PathField Label="{loc:Text FullColor.WorkDirectory}" Text="{Binding OutputRoot}" ButtonLabel="{loc:Text Xaml.Select}" Command="{Binding BrowseOutputCommand}" />
-                                <CheckBox Content="{loc:Text FullColor.Accept}" IsChecked="{Binding AllowUnmeasured}" Margin="0,12,0,12" />
+                                <CheckBox Content="{Binding ColorAcceptLabel}" IsChecked="{Binding AllowUnmeasured}" Margin="0,12,0,12" />
                             </StackPanel>
                             <WrapPanel>
                                 <Button Content="{loc:Text FullColor.Export}" Command="{Binding ExportCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,0" />
                                 <Button Content="{loc:Text FullColor.UseExistingIso}" Command="{Binding UseExistingIsoCommand}" Style="{StaticResource CompactButton}" VerticalAlignment="Center" />
                             </WrapPanel>
                             <CheckBox Content="{loc:Text FullColor.UseForExport}" IsChecked="{Binding UseForExport}" IsEnabled="{Binding CanEdit}" Margin="0,12,0,0" />
-                            <TextBlock Text="{loc:Text FullColor.OutputHint}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                            <TextBlock Text="{Binding ColorOutputHint}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0" />
                             <TextBlock Text="{Binding ResultSummary}" Style="{StaticResource CompactHint}" TextWrapping="Wrap" Margin="0,8,0,0" />
                         </StackPanel>
                     </controls:SectionCard>
@@ -91,13 +93,17 @@
                 <StackPanel x:Name="Inspector" Grid.Column="1" IsEnabled="{Binding CanEdit}">
                     <controls:SectionCard Header="{loc:Text FullColor.Parameters}" IconKind="SlidersHorizontal">
                         <StackPanel>
-                            <TextBlock Text="{loc:Text FullColor.GeometryOnly}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <TextBlock Text="{Binding ColorGeometryHint}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <StackPanel Visibility="{Binding IsDvdProject, Converter={StaticResource ColorVisible}}">
+                                <CheckBox Content="{loc:Text FullColor.DvdAutoViewing}" IsChecked="{Binding DvdAutoViewing}" Margin="0,0,0,8" />
+                                <CheckBox Content="{loc:Text FullColor.DvdDark}" IsChecked="{Binding DvdPreferDark}" Margin="0,0,0,8" />
+                            </StackPanel>
                             <WrapPanel>
                                 <Button Content="{loc:Text FullColor.Save}" Command="{Binding SaveRecipeCommand}" Style="{StaticResource CompactButton}" Margin="0,0,8,8" />
                                 <Button Content="{loc:Text FullColor.Load}" Command="{Binding LoadRecipeCommand}" Style="{StaticResource CompactButton}" Margin="0,0,8,8" />
                                 <Button Content="{loc:Text FullColor.Reset}" Command="{Binding ResetCommand}" Style="{StaticResource CompactButton}" Margin="0,0,0,8" />
                             </WrapPanel>
-                            <ItemsControl ItemsSource="{Binding Groups}">
+                            <ItemsControl ItemsSource="{Binding ActiveGroups}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <Expander Header="{Binding Title}" Style="{StaticResource CardExpander}" IsExpanded="True" Margin="0,8,0,0">
@@ -118,9 +124,9 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <controls:PathField Label="{loc:Text FullColor.Measurements}" Text="{Binding MeasurementsPath, UpdateSourceTrigger=PropertyChanged}"
-                                                ButtonLabel="{loc:Text Xaml.Select}" Command="{Binding BrowseMeasurementsCommand}" Margin="0,16,0,0" />
-                            <Button Content="{loc:Text FullColor.ClearMeasurements}" Command="{Binding ClearMeasurementsCommand}" Style="{StaticResource CompactButton}" HorizontalAlignment="Left" Margin="0,8,0,0" />
-                            <Expander Header="{loc:Text FullColor.Runtime}" Style="{StaticResource CardExpander}" Margin="0,16,0,0">
+                                                ButtonLabel="{loc:Text Xaml.Select}" Command="{Binding BrowseMeasurementsCommand}" Margin="0,16,0,0" Visibility="{Binding IsBluRayProject, Converter={StaticResource ColorVisible}}" />
+                            <Button Content="{loc:Text FullColor.ClearMeasurements}" Command="{Binding ClearMeasurementsCommand}" Style="{StaticResource CompactButton}" HorizontalAlignment="Left" Margin="0,8,0,0" Visibility="{Binding IsBluRayProject, Converter={StaticResource ColorVisible}}" />
+                            <Expander Header="{loc:Text FullColor.Runtime}" Style="{StaticResource CardExpander}" Margin="0,16,0,0" Visibility="{Binding IsBluRayProject, Converter={StaticResource ColorVisible}}">
                                 <StackPanel Margin="0,8,0,0">
                                     <controls:PathField Label="Python 3.10+" Text="{Binding PythonPath}" ButtonLabel="{loc:Text Xaml.Select}" Command="{Binding BrowsePythonCommand}" />
                                     <TextBlock Text="{loc:Text FullColor.RuntimeHint}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,6,0,0" />
