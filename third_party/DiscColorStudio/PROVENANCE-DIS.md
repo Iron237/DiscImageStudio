@@ -23,3 +23,9 @@ The author does not publish the search-chart generator or offline LUT trainer.
 FullColor.Engine/dvdcal is new GPL-3.0 code following the documented measurement
 and convex mixing principle, not a reproduction of the unpublished v5 trainer.
 Synthetic fixtures are marked and barred from physical ISO export.
+
+Explicit experimental DIS profiles retain failed quality results under
+`experimental-unvalidated`. The reader permits their declared 7.5–60 degree
+response gap only with the experimental metadata; ordinary and bundled profiles
+keep the 7.5-degree rule. The GUI labels this state separately. Convex recipes,
+LUT checksums, motif provenance and synthetic-export restrictions remain checked.

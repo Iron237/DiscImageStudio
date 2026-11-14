@@ -21,12 +21,17 @@ METRIC = np.sqrt([.25, .5, .25])
 LUMA = np.array([.2126, .7152, .0722])
 
 
-def observations(session, chart):
+def use_frame(frame, experimental=False):
+    return bool(frame.get('poseValid') or (experimental and frame.get('homography') is not None
+                                         and frame.get('observations')))
+
+
+def observations(session, chart, experimental=False):
     by_id = {p['id']: p for p in chart['patches']}
     samples = [[] for _ in chart['textures']]
     validation = []
     for frame in session['frames']:
-        if not frame.get('poseValid'):
+        if not use_frame(frame, experimental):
             continue
         for obs in frame['observations']:
             if not obs['valid']:
@@ -57,7 +62,7 @@ def observations(session, chart):
     return curves, validation
 
 
-def response(curve, angles):
+def response(curve, angles, max_gap=7.5):
     x, colors = curve
     angles = np.asarray(angles, float)
     values = np.full((angles.size, 3), np.nan)
@@ -66,7 +71,7 @@ def response(curve, angles):
     right = np.clip(np.searchsorted(x, angles, side='right'), 1, len(x) - 1)
     left = right - 1
     span = x[right] - x[left]
-    supported = (angles >= x[0]) & (angles <= x[-1]) & (span <= 7.5 + 1e-6)
+    supported = (angles >= x[0]) & (angles <= x[-1]) & (span <= max_gap + 1e-6)
     f = np.clip((angles - x[left]) / np.maximum(span, 1e-12), 0, 1)
     values[supported] = ((1 - f[:, None]) * colors[left] + f[:, None] * colors[right])[supported]
     return values
@@ -182,9 +187,13 @@ def build_profile(request, emit=lambda *args: None):
     chart = session_chart(session)
     root = Path(request['directory']).resolve()
     root.mkdir(parents=True, exist_ok=False)
-    curves, validation = observations(session, chart)
+    experimental = request.get('experimental') is True
+    gap = float(request.get('maxResponseGapDeg', 30 if experimental else 7.5))
+    if not math.isfinite(gap) or not 7.5 <= gap <= 60 or (not experimental and gap != 7.5):
+        raise ValueError('放宽角度插值必须明确使用实验建表；实验间隔范围为 7.5–60°。')
+    curves, validation = observations(session, chart, experimental)
     angles = np.arange(-1, 362, dtype=float)
-    cube = np.stack([response(curve, angles) for curve in curves], axis=1)
+    cube = np.stack([response(curve, angles, gap) for curve in curves], axis=1)
     finite = np.isfinite(cube).all(axis=2)
     supported = finite[:-2] & finite[1:-1] & finite[2:]
     coverage = supported.mean(axis=1)
@@ -197,6 +206,13 @@ def build_profile(request, emit=lambda *args: None):
                   usableFrames=sum(f.get('poseValid', False) for f in session['frames']),
                   photoCount=len(session['frames']), errorUnits='normalized camera-relative linear RGB',
                   synthetic=bool(session.get('synthetic')), physicalColorValidated=False)
+    if experimental:
+        report.update(experimental=True, standardValidationPassed=False,
+                      trainingFrames=sum(use_frame(f, True) for f in session['frames']),
+                      overrides=dict(maxResponseGapDeg=gap, standardMaxResponseGapDeg=7.5,
+                                     minimumCoverage=minimum,
+                                     acceptedUnstablePoseFrames=sum(use_frame(f, True) and not f.get('poseValid', False)
+                                                                   for f in session['frames'])))
     scores = np.full(361, -np.inf)
     for angle in range(361):
         if coverage[angle] < minimum:
@@ -252,7 +268,7 @@ def build_profile(request, emit=lambda *args: None):
     for patch, beta, measured in validation:
         if not start <= beta <= end:
             continue
-        components = [response(curves[c['texture']], [beta])[0] * c['weight'] for c in patch['components']]
+        components = [response(curves[c['texture']], [beta], gap)[0] * c['weight'] for c in patch['components']]
         predicted = np.sum(components, axis=0)
         if np.isfinite(predicted).all():
             errors[patch['kind']].append(float(np.sqrt(np.sum(((predicted - measured) * METRIC) ** 2)) / reference))
@@ -263,11 +279,15 @@ def build_profile(request, emit=lambda *args: None):
         report[kind] = dict(count=len(values), median=None if not values else float(np.median(values)),
                             p95=None if not values else float(np.quantile(values, .95)))
     passed = all(len(v) >= 24 and np.median(v) <= .12 and np.quantile(v, .95) <= .35 for v in errors.values())
-    if not passed:
+    if not passed and not experimental:
         report.update(status='review-required', message='重复块或独立混色验证未通过工程阈值（中位误差≤0.12，P95≤0.35）。请复查配准、曝光、半径差异和光路；本次不发布可应用色表。')
         report_files(root, report, coverage)
         raise ValueError(report['message'] + ' 报告：' + str(root / 'quality.txt'))
-    report.update(status='software-checks-passed', message='覆盖率、重复块与独立混色块检查通过；等待新盘验证图片效果。')
+    if experimental:
+        report.update(status='experimental-unvalidated', independentChecksPassed=bool(passed),
+                      message='实验色表：已按明确要求接纳摆位偏差、放宽角度插值并保留验证误差；未通过标准标定，供预览和试验。')
+    else:
+        report.update(status='software-checks-passed', message='覆盖率、重复块与独立混色块检查通过；等待新盘验证图片效果。')
     report_files(root, report, coverage)
     lut = b'DCCLUT01' + struct.pack('<III', 17, len(nodes), 4913) + b''.join(payloads)
     lut_path = root / 'measured-lut.bin.gz'
@@ -276,23 +296,26 @@ def build_profile(request, emit=lambda *args: None):
     textures = []
     for texture, curve in zip(chart['textures'], curves):
         x, colors = curve
+        margin = max(8., gap + .5)
         samples = [dict(angle=float(a), linear=np.round(c, 9).tolist())
-                   for a, c in zip(x, colors) if start - 8 <= a <= end + 8]
+                   for a, c in zip(x, colors) if start - margin <= a <= end + margin]
         textures.append(dict(index=texture['index'], cellId=f'T{texture["index"]:04}',
                              textureId=f'T{texture["index"]:04}', motif=texture['motif'], samples=samples))
     provenance = dict(schema=PROFILE_SCHEMA, media=chart['targetMedia'], geometry=chart['geometry'],
                       chartSha256=session['chartSha256'], sessionSha256=sha(session_path),
                       reportSha256=sha(root / 'quality.json'), capture=session.get('capture', {}),
-                      sourcePhotoHashes=[f['sha256'] for f in session['frames'] if f.get('poseValid')],
+                      sourcePhotoHashes=[f['sha256'] for f in session['frames'] if use_frame(f, experimental)],
                       synthetic=bool(session.get('synthetic')), physicalColorValidated=False,
                       validationStatus=report['status'], errorUnits=report['errorUnits'])
+    if experimental:
+        provenance.update(experimental=True, standardValidationPassed=False, overrides=report['overrides'])
     # Later photo appends/registration edits must not change a previously built profile's evidence.
     shutil.copyfile(session_path, root / 'measurements.json')
     shutil.copyfile(session['chartPath'], root / 'chart.json')
     profile = dict(format='dvd-continuous-color-map-v3', mappingMode='luminance-slice-hue-v1',
                    sourceSha256=sha(session_path), lutSha256=hashlib.sha256(lut).hexdigest().upper(),
                    lutFile=lut_path.name, gridSize=17, recipeComponents=4, recipeBanks=1,
-                   referenceLinearWhite=reference, neutralCoolShift=0, maxResponseGapDeg=7.5,
+                   referenceLinearWhite=reference, neutralCoolShift=0, maxResponseGapDeg=gap,
                    ditherSeed=17, windowStartDeg=start, windowEndDeg=end, modelStartDeg=start,
                    modelEndDeg=end, nodes=nodes, textures=textures, disCalibration=provenance)
     save_json(root / 'profile.json', profile)

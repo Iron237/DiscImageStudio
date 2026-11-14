@@ -16,6 +16,12 @@ if (args is ["--preview-fullcolor-project", var colorProject, var colorOutput])
     return;
 }
 
+if (args is ["--preview-fullcolor-profile", var profileProject, var measuredProfile, var profileOutput])
+{
+    FullColorWorkflowTests.PreviewProject(profileProject, profileOutput, profile: measuredProfile);
+    return;
+}
+
 if (args is ["--export-fullcolor-project", var exportProject, var exportDirectory, var colorIso])
 {
     FullColorWorkflowTests.PreviewProject(exportProject, exportDirectory, colorIso);

@@ -13,7 +13,7 @@ internal static class FullColorWorkflowTests
 {
     // Read-only project replay for local diagnosis; never saves the source project
     // or invokes a recorder. The normal regression suite uses synthetic fixtures.
-    internal static void PreviewProject(string project, string output, string? iso = null) => WpfTestHost.Run(() =>
+    internal static void PreviewProject(string project, string output, string? iso = null, string? profile = null) => WpfTestHost.Run(() =>
     {
         ShellViewModel shell = new(Dispatcher.CurrentDispatcher, new DiscImageStudio.Burning.WindowsImapiBurner(),
             new DiscImageStudio.SnapshotOpticalDriveProbe("none"));
@@ -25,6 +25,11 @@ internal static class FullColorWorkflowTests
                 vm.PythonPath = Environment.GetEnvironmentVariable("DIS_TEST_FULLCOLOR_PYTHON")
                     ?? throw new ArgumentException("Set DIS_TEST_FULLCOLOR_PYTHON first.");
             vm.OutputRoot = Path.GetFullPath(output);
+            if (profile is not null)
+            {
+                Pump(vm.DvdCalibration.ApplyProfileAsync(Path.GetFullPath(profile)), 180);
+                Require(vm.DvdProfilePath == Path.GetFullPath(profile), "the requested measured profile was applied");
+            }
             if (Environment.GetEnvironmentVariable("DIS_TEST_FULLCOLOR_MACRO") is { } macro)
                 vm.Groups.SelectMany(g => g.Fields).Single(f => f.Path == "patch.macrocellMm").Value = macro;
             Pump(vm.PreviewCommand.ExecuteAsync(null), 600);

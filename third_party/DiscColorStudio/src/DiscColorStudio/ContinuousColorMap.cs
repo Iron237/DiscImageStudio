@@ -41,6 +41,7 @@ public sealed class ContinuousColorMap
         public double WindowEndDeg { get; set; }
         public double ModelStartDeg { get; set; }
         public double ModelEndDeg { get; set; }
+        public JsonElement DisCalibration { get; set; }
         public Node[] Nodes { get; set; } = [];
         public ColorProfileData.Texture[] Textures { get; set; } = [];
     }
@@ -96,11 +97,17 @@ public sealed class ContinuousColorMap
         FilePath="";
         Data=JsonSerializer.Deserialize<Profile>(profile,new JsonSerializerOptions{PropertyNameCaseInsensitive=true})??throw new InvalidDataException(Ui.Text("色表为空"));
         size=Data.GridSize;count=size*size*size;components=HasJointMapping?16:4;banks=HasAdaptiveMapping?4:1;
+        bool experimental=Data.DisCalibration.ValueKind==JsonValueKind.Object
+            &&Data.DisCalibration.TryGetProperty("experimental",out var trial)&&trial.ValueKind==JsonValueKind.True
+            &&Data.DisCalibration.TryGetProperty("validationStatus",out var status)&&status.GetString()=="experimental-unvalidated"
+            &&Data.DisCalibration.TryGetProperty("standardValidationPassed",out var standard)&&standard.ValueKind==JsonValueKind.False;
+        bool gapValid=double.IsFinite(Data.MaxResponseGapDeg)
+            &&(experimental?Data.MaxResponseGapDeg is >=7.5 and <=60:Data.MaxResponseGapDeg==7.5);
         if(Data.Format is not ("dvd-continuous-color-map-v1" or "dvd-continuous-color-map-v2" or "dvd-continuous-color-map-v3" or "dvd-continuous-color-map-v4" or "dvd-continuous-color-map-v5")||size!=17||Data.Nodes.Length<2||Data.Textures.Length!=(HasTonalMapping?1154:1152)
            ||!double.IsFinite(Data.WindowStartDeg)||!double.IsFinite(Data.WindowEndDeg)||!double.IsFinite(Data.ModelStartDeg)||!double.IsFinite(Data.ModelEndDeg)
            ||Data.WindowStartDeg<0||Data.WindowEndDeg>360||Data.ModelStartDeg<Data.WindowStartDeg||Data.ModelEndDeg>Data.WindowEndDeg||Data.ModelEndDeg<=Data.ModelStartDeg||Data.ModelEndDeg-Data.ModelStartDeg+1!=Data.Nodes.Length
            ||!double.IsFinite(Data.ReferenceLinearWhite)||Data.ReferenceLinearWhite<=0||Data.ReferenceLinearWhite>1
-           ||Data.NeutralCoolShift!=(HasTonalMapping?0:.06)||Data.MaxResponseGapDeg!=7.5||Path.GetFileName(Data.LutFile)!=Data.LutFile)
+           ||Data.NeutralCoolShift!=(HasTonalMapping?0:.06)||!gapValid||Path.GetFileName(Data.LutFile)!=Data.LutFile)
             throw new InvalidDataException(Ui.Text("连续彩色映射格式或范围无效"));
         if(HasTonalMapping&&(Data.MappingMode!=(HasAdaptiveMapping?"adaptive-angular-banks-v1":HasJointMapping?"joint-angular-oklab-v1":"luminance-slice-hue-v1")||Data.Nodes.Any(n=>!double.IsFinite(n.ToneBlackY)||!double.IsFinite(n.ToneWhiteY)||n.ToneBlackY<0||n.ToneWhiteY<=n.ToneBlackY||n.ToneWhiteY>1)
             ||Data.Textures[1152].Motif!="A5"||Data.Textures[1153].Motif!="92"))throw new InvalidDataException(Ui.Text("明暗映射或DIS纹理无效"));

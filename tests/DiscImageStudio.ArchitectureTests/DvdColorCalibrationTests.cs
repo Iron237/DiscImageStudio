@@ -162,6 +162,24 @@ internal static class DvdColorCalibrationTests
             Require(testDataBlocked && !File.Exists(Path.Combine(root, "must-not-burn.iso")), "synthetic camera fixtures cannot produce physical ISO images");
             parent.ClearDvdProfile();
             Require(!parent.IsPreviewCurrent && string.IsNullOrEmpty(parent.DvdProfilePath), "returning to 95058 invalidates the self-measured plan");
+            string experimental = Path.Combine(fixture, "experimental-sparse", "profile", "profile.json");
+            FullColorWorkflowTests.Pump(calibration.ApplyProfileAsync(experimental), 180);
+            Require(parent.DvdProfileExperimental && parent.DvdProfileSynthetic
+                && parent.DvdProfileSummary.Contains(DiscImageStudio.Localization.L.T("DvdCal.SyntheticProfile"))
+                && calibration.QualityText.Contains("experimental-unvalidated"),
+                "experimental status is explicit and does not clear the synthetic fixture flag");
+            JsonNode experimentalReport = JsonNode.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(experimental)!, "quality.json")))!;
+            Require(experimentalReport["status"]!.GetValue<string>() == "experimental-unvalidated"
+                && !experimentalReport["standardValidationPassed"]!.GetValue<bool>()
+                && !experimentalReport["independentChecksPassed"]!.GetValue<bool>(),
+                "experimental import retains failed validation rather than pretending it passed");
+            FullColorWorkflowTests.Pump(parent.PreviewCommand.ExecuteAsync(null), 180);
+            string experimentalPlan = Directory.GetFiles(root, "plan.json", SearchOption.AllDirectories).OrderBy(File.GetLastWriteTimeUtc).Last();
+            Require(parent.IsPreviewCurrent && parent.Prediction is not null
+                && JsonNode.Parse(File.ReadAllText(experimentalPlan))!["responseMode"]!.GetValue<string>() == "dvd-experimental-measured-43533",
+                "experimental v3 LUTs are previewable and retain their status in the immutable plan");
+            parent.ClearDvdProfile();
+            Require(!parent.DvdProfileExperimental, "leaving an experimental profile clears its UI label");
         }
         finally
         {

@@ -10,13 +10,19 @@ internal static class DisMeasuredProfile
     {
         JsonObject data = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
         JsonNode calibration = data["disCalibration"] ?? throw new InvalidDataException("不是 DIS 自建实测色表。");
+        bool experimental = calibration["experimental"]?.GetValue<bool>() == true;
+        string status = experimental ? "experimental-unvalidated" : "software-checks-passed";
         if (calibration["schema"]?.GetValue<string>() != "dis-dvd-measured-profile-v1"
-            || calibration["validationStatus"]?.GetValue<string>() != "software-checks-passed")
+            || calibration["validationStatus"]?.GetValue<string>() != status
+            || (experimental && calibration["standardValidationPassed"]?.GetValue<bool>() != false))
             throw new InvalidDataException("色表没有通过照片覆盖率和独立混色检查。");
         string report = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "quality.json");
         if (!File.Exists(report) || DisWorker.Hash(report) != calibration["reportSha256"]!.GetValue<string>())
             throw new InvalidDataException("色表的质量报告缺失或校验失败。");
-        if (JsonNode.Parse(File.ReadAllText(report))?["status"]?.GetValue<string>() != "software-checks-passed")
+        JsonNode quality = JsonNode.Parse(File.ReadAllText(report))!;
+        if (quality["status"]?.GetValue<string>() != status
+            || (experimental && (quality["experimental"]?.GetValue<bool>() != true
+                                 || quality["standardValidationPassed"]?.GetValue<bool>() != false)))
             throw new InvalidDataException("色表的质量报告没有通过检查。");
         string directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
         string measurements = Path.Combine(directory, "measurements.json"), chart = Path.Combine(directory, "chart.json");
@@ -89,7 +95,8 @@ internal static class DisMeasuredProfile
         File.Copy(Path.Combine(sourceRoot, "measurements.json"), Path.Combine(target, "measurements.json"), overwrite: false);
         File.Copy(Path.Combine(sourceRoot, "chart.json"), Path.Combine(target, "chart.json"), overwrite: false);
         plan["configuration"]!["profilePath"] = "measured/profile.json";
-        plan["responseMode"] = "dvd-self-measured-43533";
+        plan["responseMode"] = data["disCalibration"]?["experimental"]?.GetValue<bool>() == true
+            ? "dvd-experimental-measured-43533" : "dvd-self-measured-43533";
         plan["sourceMedia"] = data["disCalibration"]!["media"]!.DeepClone();
         plan["calibration"] = data["disCalibration"]!.DeepClone();
     }

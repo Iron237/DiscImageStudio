@@ -278,6 +278,7 @@ public partial class DvdColorCalibrationViewModel : ObservableObject
                 (progress, token) => _dvd.Run(request, output, progress, token), canPreviewOutput: false))
             {
                 _parent.ApplyDvdProfile(path, JsonNode.Parse(File.ReadAllText(output))!);
+                LoadReport(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
                 IsExpanded = false;
                 BuiltProfilePath = System.IO.Path.GetFullPath(path);
                 Summary = L.T("DvdCal.Applied"); Refresh();

@@ -19,11 +19,13 @@ public partial class FullColorViewModel
     public string ActiveOutputTitle => L.T(IsDvdChart ? "DvdCal.Title" : "FullColor.Title");
     [ObservableProperty] private string _dvdProfilePath = string.Empty;
     [ObservableProperty] private bool _dvdProfileSynthetic;
+    [ObservableProperty] private bool _dvdProfileExperimental;
     public string DvdProfileSummary => string.IsNullOrWhiteSpace(DvdProfilePath) ? L.T("DvdCal.BuiltinProfile")
-        : (DvdProfileSynthetic ? L.T("DvdCal.SyntheticProfile") : L.T("DvdCal.SelfProfile")) + " · " + DvdProfilePath;
+        : L.T(DvdProfileSynthetic ? "DvdCal.SyntheticProfile" : DvdProfileExperimental ? "DvdCal.ExperimentalProfile" : "DvdCal.SelfProfile") + " · " + DvdProfilePath;
     partial void OnDvdProfilePathChanged(string value) { InvalidatePreview(); RefreshDvdBindings(); OnPropertyChanged(nameof(DvdProfileSummary)); }
     partial void OnDvdProfileSyntheticChanged(bool value) { RefreshDvdBindings(); OnPropertyChanged(nameof(DvdProfileSummary)); }
-    private string ColorAcceptRequired => L.T(string.IsNullOrWhiteSpace(DvdProfilePath) ? "FullColor.DvdAcceptRequired" : "DvdCal.AcceptRequired");
+    partial void OnDvdProfileExperimentalChanged(bool value) { RefreshDvdBindings(); OnPropertyChanged(nameof(DvdProfileSummary)); }
+    private string ColorAcceptRequired => L.T(DvdProfileExperimental ? "DvdCal.ExperimentalAcceptRequired" : string.IsNullOrWhiteSpace(DvdProfilePath) ? "FullColor.DvdAcceptRequired" : "DvdCal.AcceptRequired");
     private readonly DvdColorEngine _dvdEngine = new();
     private const string DvdPlanSchema = "dis-dvd-fullcolor-plan-v1";
     public ObservableCollection<FullColorGroup> DvdGroups { get; } = [];
@@ -33,9 +35,9 @@ public partial class FullColorViewModel
     public bool IsSupportedColorProject => IsBluRayProject || IsDvdProject;
     public string MediaBadge => IsDvdProject ? "DVD-R · 43533" : "BD-R · 64099";
     public string ColorWarning => L.T(IsDvdChart ? "DvdCal.ChartWarning" : IsDvdProject
-        ? (DvdProfileSynthetic ? "DvdCal.SyntheticProfile" : string.IsNullOrWhiteSpace(DvdProfilePath) ? "FullColor.DvdWarning" : "DvdCal.SelfWarning") : "FullColor.Warning");
+        ? (DvdProfileSynthetic ? "DvdCal.SyntheticProfile" : DvdProfileExperimental ? "DvdCal.ExperimentalWarning" : string.IsNullOrWhiteSpace(DvdProfilePath) ? "FullColor.DvdWarning" : "DvdCal.SelfWarning") : "FullColor.Warning");
     public string ColorGeometryHint => L.T(IsDvdProject ? "FullColor.DvdGeometry" : "FullColor.GeometryOnly");
-    public string ColorAcceptLabel => L.T(IsDvdProject ? (string.IsNullOrWhiteSpace(DvdProfilePath) ? "FullColor.DvdAccept" : "DvdCal.Accept") : "FullColor.Accept");
+    public string ColorAcceptLabel => L.T(IsDvdProject ? (DvdProfileExperimental ? "DvdCal.ExperimentalAccept" : string.IsNullOrWhiteSpace(DvdProfilePath) ? "FullColor.DvdAccept" : "DvdCal.Accept") : "FullColor.Accept");
     public string ColorOutputHint => L.T(IsDvdProject ? "FullColor.DvdOutputHint" : "FullColor.OutputHint");
     public string ColorDesignHint => L.T(IsDvdProject ? "FullColor.DvdDesignHint" : "FullColor.DesignInputHint");
     public string ColorToneSummary => IsDvdProject ? L.T("FullColor.DvdTone") : ToneSummary;
@@ -111,6 +113,7 @@ public partial class FullColorViewModel
         string? profile = configuration["profilePath"]?.GetValue<string>();
         DvdProfilePath = string.IsNullOrWhiteSpace(profile) ? string.Empty : Path.GetFullPath(Path.Combine(directory ?? string.Empty, profile));
         DvdProfileSynthetic = !string.IsNullOrEmpty(DvdProfilePath) && JsonNode.Parse(File.ReadAllText(DvdProfilePath))?["disCalibration"]?["synthetic"]?.GetValue<bool>() == true;
+        DvdProfileExperimental = !string.IsNullOrEmpty(DvdProfilePath) && JsonNode.Parse(File.ReadAllText(DvdProfilePath))?["disCalibration"]?["experimental"]?.GetValue<bool>() == true;
         foreach (FullColorField field in DvdFields)
             field.Value = configuration[field.Path]!.GetValue<double>().ToString("G", CultureInfo.InvariantCulture);
         DvdAutoViewing = configuration["autoViewing"]!.GetValue<bool>();
@@ -183,7 +186,7 @@ public partial class FullColorViewModel
         DvdViewingSummary = string.Join(Environment.NewLine, plan["viewing"]!.AsArray().Select(v =>
             v!["name"]!.GetValue<string>() + " · " + L.T("FullColor.DvdViewingRotation") + " "
             + v["viewingRotationDeg"]!.GetValue<double>().ToString("F1", CultureInfo.InvariantCulture) + "°"));
-        ResultSummary = (string.IsNullOrWhiteSpace(DvdProfilePath) ? "DCS · 95058 → 43533 · " : "DIS · 43533 measured · ") + directory;
+        ResultSummary = (string.IsNullOrWhiteSpace(DvdProfilePath) ? "DCS · 95058 → 43533 · " : DvdProfileExperimental ? "DIS · 43533 experimental · " : "DIS · 43533 measured · ") + directory;
         _isoPath = _isoSignature = null;
         _planSignature = Signature(); IsPreviewCurrent = true; UseForExport = true; RefreshDvdBindings(); NotifyCommands();
     }
@@ -243,6 +246,7 @@ public partial class FullColorViewModel
         LeaveDvdChart();
         DvdProfilePath = Path.GetFullPath(path);
         DvdProfileSynthetic = validation["calibration"]?["synthetic"]?.GetValue<bool>() == true;
+        DvdProfileExperimental = validation["calibration"]?["experimental"]?.GetValue<bool>() == true;
         double center = (validation["windowStartDeg"]!.GetValue<double>() + validation["windowEndDeg"]!.GetValue<double>()) / 2;
         DvdGroups.SelectMany(g => g.Fields).Single(f => f.Path == "centerBeta").Value = center.ToString("G", CultureInfo.InvariantCulture);
         AllowUnmeasured = false; InvalidatePreview(); RefreshDvdBindings(); NotifyCommands();
@@ -250,7 +254,7 @@ public partial class FullColorViewModel
 
     internal void ClearDvdProfile()
     {
-        LeaveDvdChart(); DvdProfilePath = string.Empty; DvdProfileSynthetic = false;
+        LeaveDvdChart(); DvdProfilePath = string.Empty; DvdProfileSynthetic = false; DvdProfileExperimental = false;
         AllowUnmeasured = false; InvalidatePreview(); RefreshDvdBindings(); NotifyCommands();
     }
 

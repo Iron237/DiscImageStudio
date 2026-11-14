@@ -130,6 +130,53 @@ class DvdCalibrationTests(unittest.TestCase):
         self.assertTrue(np.all(predicted[2] <= .400001))
         self.assertLess(reachable, 1)
 
+    def test_experimental_sparse_profile_preserves_failed_quality(self):
+        folder = self.root / 'experimental-sparse'
+        folder.mkdir()
+        paths = []
+        points = {}
+        for angle in range(0, 360, 20):
+            path = folder / f'{angle:03}.png'
+            points[path.name] = synthetic_photo(self.chart, angle, path, pixels=1000)
+            paths.append(str(path))
+        session_path = import_photos(dict(directory=str(folder / 'session'), chartPath=str(self.chart_path),
+                                         photos=paths, synthetic=True))
+        session = read_json(session_path)
+        for frame in list(session['frames']):
+            if frame['homography'] is None:
+                register_photo(dict(sessionPath=session_path, frameId=frame['id'], points=points[Path(frame['path']).name]))
+        session = read_json(session_path)
+        mixture_ids = {p['id'] for p in self.chart['patches'] if p['kind'] == 'holdout-mixture'}
+        for i, frame in enumerate(session['frames']):
+            frame['poseValid'] = i == 0
+            for observation in frame['observations']:
+                if observation['patch'] in mixture_ids:
+                    observation['linear'] = [.99, .99, .99]
+        save_json(session_path, session)
+        with self.assertRaises(ValueError):
+            build_profile(dict(sessionPath=session_path, directory=str(folder / 'standard'), windowWidthDeg=5))
+        self.assertFalse((folder / 'standard/profile.json').exists())
+        with self.assertRaises(ValueError):
+            build_profile(dict(sessionPath=session_path, directory=str(folder / 'implicit-override'),
+                               maxResponseGapDeg=30, windowWidthDeg=5))
+        profile_path = build_profile(dict(sessionPath=session_path, directory=str(folder / 'profile'),
+                                          experimental=True, maxResponseGapDeg=30, windowWidthDeg=5,
+                                          minimumCoverage=.85))
+        profile = read_json(profile_path)
+        report = read_json(folder / 'profile/quality.json')
+        self.assertEqual(report['status'], 'experimental-unvalidated')
+        self.assertFalse(report['standardValidationPassed'])
+        self.assertFalse(report['independentChecksPassed'])
+        self.assertEqual(report['overrides']['acceptedUnstablePoseFrames'], 17)
+        self.assertEqual(report['trainingFrames'], 18)
+        self.assertEqual(profile['maxResponseGapDeg'], 30)
+        self.assertEqual(profile['disCalibration']['validationStatus'], 'experimental-unvalidated')
+        self.assertTrue(profile['disCalibration']['experimental'])
+        self.assertFalse(profile['disCalibration']['standardValidationPassed'])
+        self.assertFalse(profile['disCalibration']['physicalColorValidated'])
+        self.assertEqual(len(profile['disCalibration']['sourcePhotoHashes']), 18)
+        self.assertEqual(read_json(folder / 'profile/measurements.json')['frames'][1]['poseValid'], False)
+
     def test_missing_angles_never_borrow_response(self):
         curve = (np.array([0., 5., 25.]), np.array([[.1]*3, [.2]*3, [.3]*3]))
         actual = response(curve, [2.5, 10, 30])
