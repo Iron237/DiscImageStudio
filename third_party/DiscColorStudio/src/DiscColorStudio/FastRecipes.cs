@@ -20,9 +20,9 @@ internal sealed class FastRecipes
     public FastRecipes(ContinuousColorMap model,Entry[] entries,double stable,double adaptive)
     {
         ContinuousColorMap.ValidateStrengths(stable,adaptive);map=model;lut=entries;
-        if(!model.HasAdaptiveMapping||Marshal.SizeOf<Entry>()!=96)throw new InvalidDataException("Expected DCCLUT03 and 96-byte entries");
+        if(!model.HasTonalMapping||Marshal.SizeOf<Entry>()!=96)throw new InvalidDataException("Expected measured tonal mapping and 96-byte normalized entries");
         motifs=model.Data.Textures.Select(t=>Convert.FromHexString(t.Motif)).ToArray();
-        bankWeights=[(1-stable)*(1-adaptive),stable*(1-adaptive),(1-stable)*adaptive,stable*adaptive];
+        bankWeights=model.HasAdaptiveMapping?[(1-stable)*(1-adaptive),stable*(1-adaptive),(1-stable)*adaptive,stable*adaptive]:[1];
     }
     private void Add(int id,double a,int node)
     {
@@ -37,7 +37,7 @@ internal sealed class FastRecipes
         int a=Math.Min((int)x,15),b=Math.Min((int)y,15),d=Math.Min((int)z,15);float p=x-a,q=y-b,t=z-d;int s0=289,s1=17,s2=1;
         if(p<q){(p,q)=(q,p);(s0,s1)=(s1,s0);}if(q<t){(q,t)=(t,q);(s1,s2)=(s2,s1);}if(p<q){(p,q)=(q,p);(s0,s1)=(s1,s0);}
         Span<int> ix=stackalloc int[4];Span<float> w=stackalloc float[4];ix[0]=a*size*size+b*size+d;ix[1]=ix[0]+s0;ix[2]=ix[1]+s1;ix[3]=ix[2]+s2;w[0]=1-p;w[1]=p-q;w[2]=q-t;w[3]=t;
-        for(int bank=0;bank<4;bank++)
+        for(int bank=0;bank<bankWeights.Length;bank++)
         {
             double bw=bankWeights[bank];if(bw<=0)continue;
             for(int node=0;node<2;node++)for(int v=0;v<4;v++)

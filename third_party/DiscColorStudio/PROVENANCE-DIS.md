@@ -12,3 +12,14 @@ DIS modifications: add a JSON/NDJSON worker entry and DisWorker.cs, isolate buil
 artifact names, and allow the worker to choose DVD encoding parallelism from the
 available logical CPU count. The normal upstream GUI retains its default scheduler.
 The worker never opens a recorder. Physical writing remains in the DIS application.
+
+DIS calibration additions: DisTextureChart writes known motifs through the original
+DVD payload encoder. DisMeasuredProfile validates and embeds measured v3 profiles
+with immutable photo evidence. FastRecipes also accepts normalized public v3
+entries; scalar/fast and serial/parallel parity are checked for v3 and bundled v5.
+The source 95058 profile and LUT are unchanged.
+
+The author does not publish the search-chart generator or offline LUT trainer.
+FullColor.Engine/dvdcal is new GPL-3.0 code following the documented measurement
+and convex mixing principle, not a reproduction of the unpublished v5 trainer.
+Synthetic fixtures are marked and barred from physical ISO export.

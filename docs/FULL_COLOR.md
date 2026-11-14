@@ -1,5 +1,7 @@
 # 全彩工作流（实验）
 
+DVD-R 43533 支持「一张盘标定」：已知纹理 ISO、多角度 RAW/JPEG 照片自动/四点配准、取样、质量报告、自建 LUT 与应用。完整操作见 [DVD 实测色表工作流](DVD_COLOR_CALIBRATION.md)。自建表与内置 95058 表分开保存。
+
 ## DVD-R 43533：DCS 实测角度混色
 
 在原生 DIS 中打开 DVD 工程后，「全彩」自动切换到 DVD 参数；BD 工程仍使用原有实验模型。DVD 引擎固定使用 [Neo-626/DiscColorStudio](https://github.com/Neo-626/DiscColorStudio/tree/ef44b13694e9873fc47ea9e0040ec5af502995ae) v0.8.5 的实测色表、角度插值、连续配方及按螺旋圈号选纹理的方法。数值与数据文件不来自旧 BD 一维频谱模型。随包色表的测量介质为美版威宝 95058 DVD-R 16×、4× 写入；当前测试目标为威宝 43533，尚未验证二者的颜色匹配。

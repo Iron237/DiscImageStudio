@@ -1,0 +1,72 @@
+<UserControl x:Class="DiscImageStudio.Views.DvdColorCalibrationView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:DiscImageStudio.Localization"
+             xmlns:controls="clr-namespace:DiscImageStudio.Controls">
+    <UserControl.Resources><BooleanToVisibilityConverter x:Key="CalVisible"/></UserControl.Resources>
+    <controls:SectionCard Header="{loc:Text DvdCal.Title}" IconKind="SlidersHorizontal">
+        <StackPanel>
+            <TextBlock Text="{loc:Text DvdCal.WorkflowHint}" Style="{StaticResource HintText}" TextWrapping="Wrap"/>
+            <WrapPanel Margin="0,10,0,0" IsEnabled="{Binding CanEdit}">
+                <Button Content="{loc:Text DvdCal.CreateChart}" Command="{Binding CreateChartCommand}" Style="{StaticResource CompactButton}" Margin="0,0,8,8"/>
+                <Button Content="{loc:Text DvdCal.OpenChart}" Command="{Binding OpenChartCommand}" Style="{StaticResource CompactButton}" Margin="0,0,8,8"/>
+                <Button Content="{loc:Text DvdCal.ExportChart}" Command="{Binding ExportChartCommand}" Style="{StaticResource CompactButton}" Margin="0,0,8,8"/>
+                <Button Content="{loc:Text DvdCal.OpenSession}" Command="{Binding OpenSessionCommand}" Style="{StaticResource CompactButton}" Margin="0,0,8,8"/>
+            </WrapPanel>
+            <TextBlock Text="{Binding ChartPath}" Style="{StaticResource CompactHint}" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding Summary}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+            <Expander Header="{loc:Text DvdCal.MeasurementSteps}" Style="{StaticResource CardExpander}" IsExpanded="{Binding IsExpanded, Mode=TwoWay}" Margin="0,8,0,0">
+                <StackPanel Margin="0,10,0,0">
+                    <TextBlock Text="{loc:Text DvdCal.LayoutHint}" Style="{StaticResource HintText}" TextWrapping="Wrap"/>
+                    <Image Source="{Binding ChartPreview}" Height="240" Stretch="Uniform" Margin="0,8,0,8"/>
+                    <TextBlock Text="{loc:Text DvdCal.CaptureNotes}" Style="{StaticResource FieldLabel}"/>
+                    <TextBox Text="{Binding CaptureNotes, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanEdit}" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="50" Margin="0,4,0,8"/>
+                    <TextBlock Text="{loc:Text DvdCal.CaptureHint}" Style="{StaticResource HintText}" TextWrapping="Wrap"/>
+                    <WrapPanel Margin="0,10,0,0" IsEnabled="{Binding CanEdit}">
+                        <Button Content="{loc:Text DvdCal.ImportPhotos}" Command="{Binding ImportPhotosCommand}" Style="{StaticResource CompactButton}" Margin="0,0,8,8"/>
+                        <Button Content="{loc:Text DvdCal.RegisterPhoto}" Command="{Binding RegisterPhotoCommand}" Style="{StaticResource CompactButton}" Margin="0,0,8,8"/>
+                    </WrapPanel>
+                    <ListBox ItemsSource="{Binding Frames}" SelectedItem="{Binding SelectedFrame}" Height="145" IsEnabled="{Binding CanEdit}"
+                             Background="{DynamicResource Surface2Brush}" Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0"
+                             FontSize="12" ItemContainerStyle="{StaticResource RowListBoxItem}"
+                             Visibility="{Binding HasFrames, Converter={StaticResource CalVisible}}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Name}" Width="200" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding Rotation}" Width="85"/>
+                                    <TextBlock Text="{Binding Status}" Width="190"/>
+                                    <TextBlock Text="{Binding ValidPatches}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <Image Source="{Binding PhotoPreview}" Height="300" Stretch="Uniform" Margin="0,8,0,8" Visibility="{Binding HasPhoto, Converter={StaticResource CalVisible}}"/>
+                    <WrapPanel IsEnabled="{Binding CanEdit}" Margin="0,6,0,0">
+                        <TextBlock Text="{loc:Text DvdCal.WindowWidth}" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" Margin="0,0,6,8"/>
+                        <TextBox Text="{Binding WindowWidth}" Width="60" Style="{StaticResource CompactTextBox}" Margin="0,0,18,8"/>
+                        <TextBlock Text="{loc:Text DvdCal.MinimumCoverage}" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" Margin="0,0,6,8"/>
+                        <TextBox Text="{Binding MinimumCoverage}" Width="60" Style="{StaticResource CompactTextBox}" Margin="0,0,18,8"/>
+                        <Button Content="{loc:Text DvdCal.BuildProfile}" Command="{Binding BuildProfileCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8"/>
+                    </WrapPanel>
+                    <TextBlock Text="{loc:Text DvdCal.CoverageHint}" Style="{StaticResource CompactHint}" Visibility="{Binding HasCoverage, Converter={StaticResource CalVisible}}"/>
+                    <Image Source="{Binding CoveragePreview}" Height="70" Stretch="Uniform" Visibility="{Binding HasCoverage, Converter={StaticResource CalVisible}}"/>
+                    <TextBox Text="{Binding QualityText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" Height="160" MinHeight="160"
+                             VerticalScrollBarVisibility="Auto" Margin="0,8,0,8" Visibility="{Binding HasReport, Converter={StaticResource CalVisible}}"/>
+                    <TextBlock Text="{Binding BuiltProfilePath}" Style="{StaticResource CompactHint}" TextWrapping="Wrap"/>
+                    <WrapPanel Margin="0,8,0,0" IsEnabled="{Binding CanEdit}">
+                        <Button Content="{loc:Text DvdCal.ApplyProfile}" Command="{Binding ApplyProfileCommand}" Style="{StaticResource CompactButton}" Margin="0,0,8,8"/>
+                    </WrapPanel>
+                </StackPanel>
+            </Expander>
+            <TextBlock Text="{Binding ActiveProfileSummary}" Style="{StaticResource CompactHint}" TextWrapping="Wrap" Margin="0,8,0,8"/>
+            <WrapPanel IsEnabled="{Binding CanEdit}">
+                <Button Content="{loc:Text DvdCal.ImportProfile}" Command="{Binding BrowseProfileCommand}" Style="{StaticResource CompactButton}" Margin="0,0,8,0"/>
+                <Button Content="{loc:Text DvdCal.UseBuiltin}" Command="{Binding BuiltinProfileCommand}" Style="{StaticResource CompactButton}"/>
+            </WrapPanel>
+            <Expander Header="{loc:Text DvdCal.Runtime}" Style="{StaticResource CardExpander}" Margin="0,10,0,0">
+                <controls:PathField Label="Python 3.11+" Text="{Binding PythonPath}" ButtonLabel="{loc:Text Xaml.Select}" Command="{Binding BrowsePythonCommand}" IsEnabled="{Binding CanEdit}"/>
+            </Expander>
+        </StackPanel>
+    </controls:SectionCard>
+</UserControl>

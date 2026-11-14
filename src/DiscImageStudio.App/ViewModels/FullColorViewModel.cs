@@ -48,6 +48,7 @@ public partial class FullColorViewModel : ObservableObject
     {
         _shell = shell;
         InitializeDvdColor();
+        DvdCalibration = new DvdColorCalibrationViewModel(this, shell);
         Groups.Add(new("FullColor.Layout", [
             new("patch.macrocellMm", "FullColor.Macro", .25), new("patch.microcellMm", "FullColor.Micro", .05)]));
         Groups.Add(new("FullColor.CalibrationRegion", [
@@ -73,7 +74,7 @@ public partial class FullColorViewModel : ObservableObject
         PreviewCommand = new AsyncRelayCommand(() => PreviewAsync(false), () => CanEdit && HasDesignSource);
         CalibrationCommand = new AsyncRelayCommand(() => PreviewAsync(true), () => CanEdit && IsBluRayProject);
         ExportCommand = new AsyncRelayCommand(ExportAsync, () => CanEdit && IsPreviewCurrent && _planPath is not null && IsSupportedColorProject);
-        UseExistingIsoCommand = new AsyncRelayCommand(PickExistingIsoAsync, () => CanEdit && IsPreviewCurrent && !_calibration && IsSupportedColorProject);
+        UseExistingIsoCommand = new AsyncRelayCommand(PickExistingIsoAsync, () => CanEdit && IsPreviewCurrent && (!_calibration || IsDvdProject) && IsSupportedColorProject);
         SaveRecipeCommand = new RelayCommand(SaveRecipe, () => CanEdit);
         LoadRecipeCommand = new RelayCommand(LoadRecipe, () => CanEdit);
         OpenPlanCommand = new RelayCommand(OpenPlan, () => CanEdit);
@@ -89,6 +90,7 @@ public partial class FullColorViewModel : ObservableObject
                 {
                     _sourceProjectPath = _shell.ProjectFilePath;
                     _planPath = _planSignature = _isoPath = _isoSignature = null;
+                    _dvdChartPath = _dvdPriorImageOutputPath = null; _calibration = false;
                     Prediction = TargetPreview = ErrorPreview = InputPreview = NativeDitherPreview = TexturePreview = null;
                     UseForExport = false;
                     InvalidatePreview();
@@ -169,6 +171,7 @@ public partial class FullColorViewModel : ObservableObject
         OnPropertyChanged(nameof(IsBluRayProject));
         OnPropertyChanged(nameof(SourceSummary));
         RefreshDvdBindings();
+        DvdCalibration.Refresh();
         if (IsPreviewCurrent)
         {
             try { if (_planSignature != Signature() || !IsSupportedColorProject) InvalidatePreview(); }
@@ -192,6 +195,7 @@ public partial class FullColorViewModel : ObservableObject
         foreach (IRelayCommand command in new IRelayCommand[] { BrowseMeasurementsCommand,
             ClearMeasurementsCommand, BrowsePythonCommand, BrowseOutputCommand, SaveRecipeCommand, LoadRecipeCommand,
             OpenPlanCommand, ResetCommand, PreviewCommand, CalibrationCommand, ExportCommand, UseExistingIsoCommand }) command.NotifyCanExecuteChanged();
+        DvdCalibration?.Refresh();
     }
 
     private void PickMeasurements() { if (_shell.Dialogs?.PickOpen(L.T("FullColor.Measurements"), "JSON|*.json") is { } p) MeasurementsPath = p; }
@@ -255,6 +259,7 @@ public partial class FullColorViewModel : ObservableObject
     }
     private string Signature()
     {
+        if (IsDvdChart && _dvdChartPath is not null) return BuildDvdGeometry().ToJsonString() + "|chart:" + FileStamp(_dvdChartPath);
         if (IsDvdProject) return BuildDvdConfiguration().ToJsonString() + "|" + DesignFingerprint();
         string Stamp(string path) => File.Exists(path) ? path + ":" + new FileInfo(path).Length + ":" + File.GetLastWriteTimeUtc(path).Ticks : path;
         return string.Join('|', Fields.Select(f => f.Value)) + "|" + DesignFingerprint() + "|" + Stamp(MeasurementsPath);
@@ -333,6 +338,8 @@ public partial class FullColorViewModel : ObservableObject
     internal void LoadPlan(string path, bool applyConfiguration)
     {
         JsonObject plan = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        if (plan["schema"]?.GetValue<string>() == "dis-dvd-color-session-v1") { DvdCalibration.LoadSession(path); return; }
+        if (plan["schema"]?.GetValue<string>() == "dis-dvd-texture-chart-v1") { DvdCalibration.LoadChart(path); return; }
         if (plan["schema"]?.GetValue<string>() == DvdPlanSchema) { LoadDvdPlan(path, applyConfiguration); return; }
         if (plan["schema"]?.GetValue<string>() != "bdcolor-plan-v1") throw new ArgumentException("Unsupported full-color plan.");
         if (!IsBluRayProject || plan["designSource"]?["fingerprint"]?.GetValue<string>() != DesignFingerprint())
@@ -359,7 +366,7 @@ public partial class FullColorViewModel : ObservableObject
     {
         try
         {
-            string? output = _shell.Dialogs?.PickSave("Full Color ISO|*.iso", ".iso", IsDvdProject ? "fullcolor-43533.iso" : _calibration ? "palette-64099.iso" : "fullcolor-64099.iso");
+            string? output = _shell.Dialogs?.PickSave("Full Color ISO|*.iso", ".iso", IsDvdChart ? "calibration-43533.iso" : IsDvdProject ? "fullcolor-43533.iso" : _calibration ? "palette-64099.iso" : "fullcolor-64099.iso");
             if (output is null) return;
             // SaveFileDialog has already obtained overwrite confirmation.
             await ExportToAsync(output, overwriteConfirmed: File.Exists(output));
@@ -410,7 +417,7 @@ public partial class FullColorViewModel : ObservableObject
     {
         _isoPath = _isoSignature = null;
         RequireProjectGeometry();
-        if (!IsPreviewCurrent || _calibration || _planPath is null || _planSignature != Signature())
+        if (!IsPreviewCurrent || (_calibration && !IsDvdProject) || _planPath is null || _planSignature != Signature())
             throw new InvalidOperationException(L.T("FullColor.ExportStale"));
         string image = Path.GetFullPath(path);
         string signature = Signature();
@@ -433,7 +440,7 @@ public partial class FullColorViewModel : ObservableObject
     internal string RequireCurrentIso()
     {
         RequireProjectGeometry();
-        if (IsDvdProject && !AllowUnmeasured) throw new InvalidOperationException(L.T("FullColor.DvdAcceptRequired"));
+        if (IsDvdProject && !_calibration && !AllowUnmeasured) throw new InvalidOperationException(ColorAcceptRequired);
         if (!IsPreviewCurrent || _isoSignature != Signature() || _isoPath is null || !File.Exists(_isoPath)
             || new FileInfo(_isoPath).Length != ExpectedColorIsoBytes)
             throw new InvalidOperationException(L.T("FullColor.ExportBeforeBurn"));
@@ -475,7 +482,7 @@ public partial class FullColorViewModel : ObservableObject
         catch (Exception e) { ShowError(e); }
     }
     private void ShowError(Exception e) => _shell.ShowToast(L.T("FullColor.Title"), e.Message, ToastKind.Warning);
-    private static BitmapSource? ReadBitmap(string path)
+    internal static BitmapSource? ReadBitmap(string path)
     {
         if (!File.Exists(path)) return null;
         try

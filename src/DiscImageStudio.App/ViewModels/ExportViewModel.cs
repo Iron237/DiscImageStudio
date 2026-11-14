@@ -187,7 +187,7 @@ public partial class ExportViewModel : ObservableObject
 
         int layerCount = _design.Layers.Count;
         SourceSummary = (IsBluRay || IsDvd) && FullColor.UseForExport
-            ? L.T("FullColor.Title") + " · " + FullColor.PreviewState
+            ? FullColor.ActiveOutputTitle + " · " + FullColor.PreviewState
             : layerCount == 0
             ? L.T("请先在设计页导入图片。")
             : L.F($"设计页合成图源（{RingImageQuality.GenerationSize} px）");

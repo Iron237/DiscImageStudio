@@ -19,7 +19,7 @@ permissions:
 jobs:
   fullcolor:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_NOLOGO: '1'
@@ -38,6 +38,7 @@ jobs:
         run: |
           python -m pip install -r src/DiscImageStudio.FullColor.Engine/requirements.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:DIS_DVD_CAL_FIXTURE_ROOT = Join-Path $env:RUNNER_TEMP 'dis-dvd-calibration-synthetic-fixture'
           python -m unittest discover -s src/DiscImageStudio.FullColor.Engine/tests -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build DiscImageStudio.slnx -c Release
@@ -60,6 +61,8 @@ jobs:
           if (-not (Test-Path "$app/FullColorEngine/bdcolor/solve.py")) { throw 'Parallel solver missing from build output' }
           if (-not (Test-Path "$app/FullColorEngine/bdcolor/storage.py")) { throw 'Recoverable export storage missing from build output' }
           if (-not (Test-Path "$app/DvdColorWorker/DiscColorStudio.exe")) { throw 'DVD measured-color worker missing from build output' }
+          if (-not (Test-Path "$app/FullColorEngine/dvdcal_worker.py")) { throw 'DVD photo calibration worker missing from build output' }
+          if (-not (Test-Path "$app/FullColorEngine/dvdcal/fit.py")) { throw 'DVD measured LUT builder missing from build output' }
           if (-not (Test-Path "$app/DvdColorWorker/data/continuous-color-lut.bin.gz")) { throw 'DVD measured angular LUT missing from build output' }
           if (-not (Test-Path "$app/FullColorEngine/configs/verbatim_64099.json")) { throw 'Color configuration missing from build output' }
       - uses: actions/upload-artifact@v4

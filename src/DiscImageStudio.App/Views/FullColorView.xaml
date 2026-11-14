@@ -4,6 +4,7 @@
              xmlns:loc="clr-namespace:DiscImageStudio.Localization"
              xmlns:vm="clr-namespace:DiscImageStudio.ViewModels"
              xmlns:controls="clr-namespace:DiscImageStudio.Controls"
+             xmlns:views="clr-namespace:DiscImageStudio.Views"
              SizeChanged="View_SizeChanged">
     <UserControl.Resources><BooleanToVisibilityConverter x:Key="ColorVisible" /></UserControl.Resources>
     <ScrollViewer controls:ScrollMaskBehavior.Enabled="True">
@@ -25,7 +26,9 @@
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="InspectorColumn" Width="360" /></Grid.ColumnDefinitions>
                 <StackPanel x:Name="PreviewPanel" Grid.Column="0" Margin="0,0,20,0">
-                    <controls:SectionCard Header="{loc:Text FullColor.DesignSource}" IconKind="Image" Margin="0,0,0,16">
+                    <views:DvdColorCalibrationView DataContext="{Binding DvdCalibration}"
+                        Visibility="{Binding DataContext.IsDvdProject, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}, Converter={StaticResource ColorVisible}}" Margin="0,0,0,16"/>
+                    <controls:SectionCard Header="{loc:Text FullColor.DesignSource}" IconKind="Image" Margin="0,0,0,16" Visibility="{Binding ShowDesignColor, Converter={StaticResource ColorVisible}}">
                         <StackPanel IsEnabled="{Binding CanEdit}">
                             <controls:SourceChip Text="{Binding SourceSummary}">
                                 <controls:SourceChip.Actions>
@@ -43,7 +46,7 @@
                             </WrapPanel>
                         </StackPanel>
                     </controls:SectionCard>
-                    <controls:MonitorCard Title="{loc:Text FullColor.Compare}" IconKind="Rainbow" StatusText="{Binding PreviewState}" Margin="0,0,0,16">
+                    <controls:MonitorCard Title="{loc:Text FullColor.Compare}" IconKind="Rainbow" StatusText="{Binding PreviewState}" Margin="0,0,0,16" Visibility="{Binding ShowDesignColor, Converter={StaticResource ColorVisible}}">
                         <StackPanel Margin="12">
                             <UniformGrid Columns="2">
                                 <StackPanel Margin="6">
@@ -78,7 +81,7 @@
                         <StackPanel>
                             <StackPanel IsEnabled="{Binding CanEdit}">
                                 <controls:PathField Label="{loc:Text FullColor.WorkDirectory}" Text="{Binding OutputRoot}" ButtonLabel="{loc:Text Xaml.Select}" Command="{Binding BrowseOutputCommand}" />
-                                <CheckBox Content="{Binding ColorAcceptLabel}" IsChecked="{Binding AllowUnmeasured}" Margin="0,12,0,12" />
+                                <CheckBox Content="{Binding ColorAcceptLabel}" IsChecked="{Binding AllowUnmeasured}" Margin="0,12,0,12" Visibility="{Binding ShowDesignColor, Converter={StaticResource ColorVisible}}" />
                             </StackPanel>
                             <WrapPanel>
                                 <Button Content="{loc:Text FullColor.Export}" Command="{Binding ExportCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,0" />
@@ -90,7 +93,7 @@
                         </StackPanel>
                     </controls:SectionCard>
                 </StackPanel>
-                <StackPanel x:Name="Inspector" Grid.Column="1" IsEnabled="{Binding CanEdit}">
+                <StackPanel x:Name="Inspector" Grid.Column="1" IsEnabled="{Binding CanEdit}" Visibility="{Binding ShowDesignColor, Converter={StaticResource ColorVisible}}">
                     <controls:SectionCard Header="{loc:Text FullColor.Parameters}" IconKind="SlidersHorizontal">
                         <StackPanel>
                             <TextBlock Text="{Binding ColorGeometryHint}" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,0,0,12" />

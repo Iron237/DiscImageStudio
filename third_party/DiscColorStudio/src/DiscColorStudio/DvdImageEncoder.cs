@@ -69,7 +69,7 @@ public static class DvdImageEncoder
             plans=design.HasAngleColor?engine.Plans(design,renderer):[];map=design.HasAngleColor?AngleColorEngine.MapFor(design):null;
             settings=plans.Select(p=>design.Layers.Single(l=>l.Id==p.LayerId)).ToArray();motifs=design.Palette.ToDictionary(s=>s.Id,s=>Convert.FromHexString(s.Motif));
             grayRaster=design.HasGrayLayers?new RecipeRaster(design,size):null;
-            FastRecipes.Entry[]? lut=map?.HasAdaptiveMapping==true?MemoryMarshal.Cast<byte,FastRecipes.Entry>(design.AngleProfileAssets[AngleColorSettings.LutName].AsSpan(28)).ToArray():null;
+            FastRecipes.Entry[]? lut=map?.HasTonalMapping==true?map.FastEntries():null;
             workers=new(()=>new Worker(lut is null?null:settings.Select(l=>new FastRecipes(map!,lut,l.BandingReduction,l.AdaptiveMixing)).ToArray()),true);
         }
         private Pixels Build(Rectangle rect)

@@ -254,6 +254,19 @@ public sealed class ContinuousColorMap
         double u=((unchecked((uint)turn*40503u+Data.DitherSeed)&65535u)+.5)/65536;double sum=0;
         foreach(var c in recipe.Components){sum+=c.Weight;if(u<sum)return c.Texture;}return recipe.Components[^1].Texture;
     }
+    // DIS: normalize the public v3 measured LUT and bundled v5 banks into the
+    // same fast encoder representation. Component order and weights are unchanged.
+    internal FastRecipes.Entry[] FastEntries()
+    {
+        var result = new FastRecipes.Entry[entries.Length];
+        for (int i = 0; i < entries.Length; i++)
+            for (int k = 0; k < components; k++)
+            {
+                result[i].Ids[k] = (ushort)entries[i].Id(k);
+                result[i].Weights[k] = entries[i].Weight(k);
+            }
+        return result;
+    }
     public byte SampleByte(Color rgb,double beta,ulong spiralTurn,ulong globalLogicalPayloadByte,bool allowUnmeasured=false,bool preferDisDark=false,double bandingReduction=1,double adaptiveMixing=1)
     {
         var recipe=Resolve(rgb,beta,preferDisDark,bandingReduction,adaptiveMixing);if(recipe.Linear is null&&!allowUnmeasured)throw new InvalidOperationException(Ui.Text("该观察角度没有可用颜色测量"));

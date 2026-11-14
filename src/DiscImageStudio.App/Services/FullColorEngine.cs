@@ -20,7 +20,8 @@ internal sealed class FullColorEngine
     {
         if (!File.Exists(pythonPath))
             throw new FileNotFoundException("Full Color Python runtime is missing. Run tools/setup-fullcolor.ps1 or select an installed runtime.", pythonPath);
-        string worker = Path.Combine(EngineDirectory, "worker.py");
+        bool dvdCalibration = request["operation"]?.GetValue<string>().StartsWith("dvdcal-", StringComparison.Ordinal) == true;
+        string worker = Path.Combine(EngineDirectory, dvdCalibration ? "dvdcal_worker.py" : "worker.py");
         if (!File.Exists(worker)) throw new FileNotFoundException("Full Color engine files are missing.", worker);
         string root = request["workRoot"]!.GetValue<string>();
         Directory.CreateDirectory(root);

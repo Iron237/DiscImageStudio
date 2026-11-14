@@ -3265,3 +3265,12 @@ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
 CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 THE POSSIBILITY OF SUCH DAMAGE.
+
+DVD photo calibration Python dependencies
+=========================================
+OpenCV: https://github.com/opencv/opencv (Apache-2.0).
+opencv-python packaging: https://github.com/opencv/opencv-python (MIT).
+rawpy: https://github.com/letmaik/rawpy (MIT); LibRaw is distributed under LGPL-2.1.
+The installed wheels retain their LICENSE/third-party notices in Python's
+site-packages dist-info directories. They are separate runtime dependencies;
+the DVD calibration implementation does not modify these libraries.

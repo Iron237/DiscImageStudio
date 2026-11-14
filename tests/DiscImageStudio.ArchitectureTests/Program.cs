@@ -34,6 +34,18 @@ if (args is ["--test-dvd-fullcolor"])
     return;
 }
 
+if (args is ["--test-dvd-calibration"])
+{
+    DvdColorCalibrationTests.Run();
+    return;
+}
+
+if (args is ["--export-dvd-calibration-chart", var chartProject, var chartPlan, var chartImage])
+{
+    DvdColorCalibrationTests.ExportChart(chartProject, chartPlan, chartImage);
+    return;
+}
+
 if (args is ["--test-bluray-burn"])
 {
     ImapiDeviceSchedulingTests.Run();
@@ -179,6 +191,7 @@ Throws<ArgumentException>(() => catalog.Resolve("unknown-command"), "unknown com
 MaximizedWindowBoundsTests.Run();
 FullColorWorkflowTests.Run();
 DvdColorWorkflowTests.Run();
+DvdColorCalibrationTests.Run();
 WindowWorkAreaNativeTests.Run();
 BluRayModuleTests.Run();
 BluRayEncodingTests.Run();

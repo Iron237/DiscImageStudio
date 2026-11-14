@@ -279,7 +279,7 @@ public partial class BurnViewModel : ObservableObject
         }
         else if ((IsBluRayBurn || IsDvdBurn) && _shell.FullColor.UseForExport)
         {
-            SourceTitle = L.T("FullColor.Title");
+            SourceTitle = _shell.FullColor.ActiveOutputTitle;
             SourceDetails = _shell.FullColor.PreviewState + " · " + L.T("FullColor.ExportBeforeBurn");
             identity = $"fullcolor:{_design.CompositeRevision}:{_shell.FullColor.IsPreviewCurrent}";
         }
@@ -569,7 +569,7 @@ public partial class BurnViewModel : ObservableObject
                 if (capacity.WritableSectors < colorLength / 2048)
                     throw new ArgumentException(L.T("FullColor.Capacity"));
                 request = CreateFullColorBurnRequest(device.Id, fullColorIso, bluRay, selectedWriteSpeed.Speed);
-                contentDescription = L.T("FullColor.Title") + " · " + Path.GetFileName(fullColorIso) + " · "
+                contentDescription = _shell.FullColor.ActiveOutputTitle + " · " + Path.GetFileName(fullColorIso) + " · "
                     + (colorLength / 1_000_000_000.0).ToString("F2", CultureInfo.CurrentCulture) + " GB";
             }
             else if (calibration)

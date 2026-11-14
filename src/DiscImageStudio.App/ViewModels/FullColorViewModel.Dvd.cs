@@ -11,6 +11,19 @@ namespace DiscImageStudio.ViewModels;
 
 public partial class FullColorViewModel
 {
+    public DvdColorCalibrationViewModel DvdCalibration { get; }
+    private string? _dvdChartPath;
+    private string? _dvdPriorImageOutputPath;
+    public bool IsDvdChart => IsDvdProject && _calibration && _dvdChartPath is not null;
+    public bool ShowDesignColor => !IsDvdChart;
+    public string ActiveOutputTitle => L.T(IsDvdChart ? "DvdCal.Title" : "FullColor.Title");
+    [ObservableProperty] private string _dvdProfilePath = string.Empty;
+    [ObservableProperty] private bool _dvdProfileSynthetic;
+    public string DvdProfileSummary => string.IsNullOrWhiteSpace(DvdProfilePath) ? L.T("DvdCal.BuiltinProfile")
+        : (DvdProfileSynthetic ? L.T("DvdCal.SyntheticProfile") : L.T("DvdCal.SelfProfile")) + " · " + DvdProfilePath;
+    partial void OnDvdProfilePathChanged(string value) { InvalidatePreview(); RefreshDvdBindings(); OnPropertyChanged(nameof(DvdProfileSummary)); }
+    partial void OnDvdProfileSyntheticChanged(bool value) { RefreshDvdBindings(); OnPropertyChanged(nameof(DvdProfileSummary)); }
+    private string ColorAcceptRequired => L.T(string.IsNullOrWhiteSpace(DvdProfilePath) ? "FullColor.DvdAcceptRequired" : "DvdCal.AcceptRequired");
     private readonly DvdColorEngine _dvdEngine = new();
     private const string DvdPlanSchema = "dis-dvd-fullcolor-plan-v1";
     public ObservableCollection<FullColorGroup> DvdGroups { get; } = [];
@@ -19,9 +32,10 @@ public partial class FullColorViewModel
     public bool IsDvdProject => _shell.IsProjectOpen && _shell.CurrentProject?.IsDvd == true;
     public bool IsSupportedColorProject => IsBluRayProject || IsDvdProject;
     public string MediaBadge => IsDvdProject ? "DVD-R · 43533" : "BD-R · 64099";
-    public string ColorWarning => L.T(IsDvdProject ? "FullColor.DvdWarning" : "FullColor.Warning");
+    public string ColorWarning => L.T(IsDvdChart ? "DvdCal.ChartWarning" : IsDvdProject
+        ? (DvdProfileSynthetic ? "DvdCal.SyntheticProfile" : string.IsNullOrWhiteSpace(DvdProfilePath) ? "FullColor.DvdWarning" : "DvdCal.SelfWarning") : "FullColor.Warning");
     public string ColorGeometryHint => L.T(IsDvdProject ? "FullColor.DvdGeometry" : "FullColor.GeometryOnly");
-    public string ColorAcceptLabel => L.T(IsDvdProject ? "FullColor.DvdAccept" : "FullColor.Accept");
+    public string ColorAcceptLabel => L.T(IsDvdProject ? (string.IsNullOrWhiteSpace(DvdProfilePath) ? "FullColor.DvdAccept" : "DvdCal.Accept") : "FullColor.Accept");
     public string ColorOutputHint => L.T(IsDvdProject ? "FullColor.DvdOutputHint" : "FullColor.OutputHint");
     public string ColorDesignHint => L.T(IsDvdProject ? "FullColor.DvdDesignHint" : "FullColor.DesignInputHint");
     public string ColorToneSummary => IsDvdProject ? L.T("FullColor.DvdTone") : ToneSummary;
@@ -47,22 +61,35 @@ public partial class FullColorViewModel
     {
         foreach (string property in new[] { nameof(IsDvdProject), nameof(IsSupportedColorProject), nameof(ActiveGroups),
             nameof(MediaBadge), nameof(ColorWarning), nameof(ColorGeometryHint), nameof(ColorAcceptLabel),
-            nameof(ColorOutputHint), nameof(ColorDesignHint), nameof(ColorToneSummary) }) OnPropertyChanged(property);
+            nameof(ColorOutputHint), nameof(ColorDesignHint), nameof(ColorToneSummary), nameof(IsDvdChart), nameof(DvdProfileSummary),
+            nameof(ShowDesignColor), nameof(ActiveOutputTitle) }) OnPropertyChanged(property);
     }
 
-    private JsonObject BuildDvdConfiguration()
+    internal JsonObject BuildDvdGeometry()
     {
         var state = _shell.State;
         double Read(string text) => ParameterParser.ParseDouble(text, "DVD geometry");
-        JsonObject configuration = new()
-        {
-            ["autoViewing"] = DvdAutoViewing, ["preferDark"] = DvdPreferDark,
-            ["geometry"] = new JsonObject { ["innerRadiusMm"] = Read(state.DvdInnerRadius),
+        return new JsonObject { ["innerRadiusMm"] = Read(state.DvdInnerRadius),
                 ["outerRadiusMm"] = Read(state.DvdOuterRadius),
                 ["sectors"] = ParameterParser.ParsePositiveLong(state.DvdTotalSectors, "sectors"),
                 ["pitchLinear"] = Read(state.DvdPitchLinear), ["pitchQuadratic"] = Read(state.DvdPitchQuadratic),
-                ["pitchCubic"] = Read(state.DvdPitchCubic) },
-        };
+                ["pitchCubic"] = Read(state.DvdPitchCubic) };
+    }
+
+    private static string FileStamp(string path) => File.Exists(path) ? Path.GetFullPath(path) + ":" + new FileInfo(path).Length + ":" + File.GetLastWriteTimeUtc(path).Ticks : path;
+
+    private JsonObject BuildDvdConfiguration()
+    {
+        JsonObject configuration = new() { ["autoViewing"] = DvdAutoViewing, ["preferDark"] = DvdPreferDark,
+            ["geometry"] = BuildDvdGeometry() };
+        if (!string.IsNullOrWhiteSpace(DvdProfilePath))
+        {
+            JsonNode data = JsonNode.Parse(File.ReadAllText(DvdProfilePath))!;
+            string lut = data["lutFile"]!.GetValue<string>();
+            if (Path.GetFileName(lut) != lut) throw new ArgumentException("Invalid profile LUT path.");
+            configuration["profilePath"] = Path.GetFullPath(DvdProfilePath);
+            configuration["profileStamp"] = FileStamp(DvdProfilePath) + "|" + FileStamp(Path.Combine(Path.GetDirectoryName(DvdProfilePath)!, lut));
+        }
         foreach (FullColorField field in DvdFields)
         {
             if (!double.TryParse(field.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double number) || !double.IsFinite(number))
@@ -78,15 +105,19 @@ public partial class FullColorViewModel
         return configuration;
     }
 
-    private void ApplyDvdConfiguration(JsonNode configuration)
+    private void ApplyDvdConfiguration(JsonNode configuration, string? directory = null)
     {
+        LeaveDvdChart();
+        string? profile = configuration["profilePath"]?.GetValue<string>();
+        DvdProfilePath = string.IsNullOrWhiteSpace(profile) ? string.Empty : Path.GetFullPath(Path.Combine(directory ?? string.Empty, profile));
+        DvdProfileSynthetic = !string.IsNullOrEmpty(DvdProfilePath) && JsonNode.Parse(File.ReadAllText(DvdProfilePath))?["disCalibration"]?["synthetic"]?.GetValue<bool>() == true;
         foreach (FullColorField field in DvdFields)
             field.Value = configuration[field.Path]!.GetValue<double>().ToString("G", CultureInfo.InvariantCulture);
         DvdAutoViewing = configuration["autoViewing"]!.GetValue<bool>();
         DvdPreferDark = configuration["preferDark"]!.GetValue<bool>();
     }
 
-    private void RequireDvdGeometry()
+    internal void RequireDvdGeometry()
     {
         var state = _shell.State;
         if (!IsDvdProject || state.GetUsableSectors(OpticalDiscFamily.Dvd)
@@ -106,6 +137,7 @@ public partial class FullColorViewModel
         try
         {
             RequireDvdGeometry();
+            LeaveDvdChart(); RefreshDvdBindings();
             _preparing = true; NotifyCommands();
             string signature = Signature(), fingerprint = DesignFingerprint();
             string composite = await _shell.Design.EnsureExportCompositeAsync();
@@ -135,12 +167,13 @@ public partial class FullColorViewModel
 
     private void LoadDvdPlan(string path, bool applyConfiguration)
     {
+        LeaveDvdChart();
         RequireDvdGeometry();
         JsonObject plan = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
         if (plan["schema"]?.GetValue<string>() != DvdPlanSchema
             || plan["designSource"]?["fingerprint"]?.GetValue<string>() != DesignFingerprint())
             throw new ArgumentException(L.T("FullColor.WrongDesign"));
-        if (applyConfiguration) ApplyDvdConfiguration(plan["configuration"]!);
+        if (applyConfiguration) ApplyDvdConfiguration(plan["configuration"]!, Path.GetDirectoryName(Path.GetFullPath(path)));
         _planPath = Path.GetFullPath(path); _calibration = false;
         string directory = Path.GetDirectoryName(_planPath)!;
         TargetPreview = ReadBitmap(Path.Combine(directory, "target.png"));
@@ -150,16 +183,17 @@ public partial class FullColorViewModel
         DvdViewingSummary = string.Join(Environment.NewLine, plan["viewing"]!.AsArray().Select(v =>
             v!["name"]!.GetValue<string>() + " · " + L.T("FullColor.DvdViewingRotation") + " "
             + v["viewingRotationDeg"]!.GetValue<double>().ToString("F1", CultureInfo.InvariantCulture) + "°"));
-        ResultSummary = "DCS · 95058 → 43533 · " + directory;
+        ResultSummary = (string.IsNullOrWhiteSpace(DvdProfilePath) ? "DCS · 95058 → 43533 · " : "DIS · 43533 measured · ") + directory;
         _isoPath = _isoSignature = null;
-        _planSignature = Signature(); IsPreviewCurrent = true; UseForExport = true; NotifyCommands();
+        _planSignature = Signature(); IsPreviewCurrent = true; UseForExport = true; RefreshDvdBindings(); NotifyCommands();
     }
 
     private async Task<bool> ExportDvdAsync(string output, bool overwriteConfirmed)
     {
         RequireDvdGeometry();
         if (!IsPreviewCurrent || _planPath is null || _planSignature != Signature()) throw new InvalidOperationException(L.T("FullColor.Stale"));
-        if (!AllowUnmeasured) throw new InvalidOperationException(L.T("FullColor.DvdAcceptRequired"));
+        if (!IsDvdChart && DvdProfileSynthetic) throw new InvalidOperationException(L.T("DvdCal.SyntheticProfile"));
+        if (!IsDvdChart && !AllowUnmeasured) throw new InvalidOperationException(ColorAcceptRequired);
         bool overwrite = File.Exists(output);
         if (overwrite && !overwriteConfirmed && !await _shell.ConfirmAsync(L.T("FullColor.Replace"),
             L.T("FullColor.ReplaceHint") + Environment.NewLine + output, L.T("FullColor.Replace"))) return false;
@@ -182,5 +216,49 @@ public partial class FullColorViewModel
         int index = 0;
         foreach (FullColorField field in DvdFields) field.Value = values[index++].ToString("G", CultureInfo.InvariantCulture);
         DvdAutoViewing = true; DvdPreferDark = false; InvalidatePreview();
+    }
+
+    internal void SelectDvdChart(string path)
+    {
+        RequireDvdGeometry();
+        JsonNode chart = JsonNode.Parse(File.ReadAllText(path))!;
+        if (chart["schema"]?.GetValue<string>() != "dis-dvd-texture-chart-v1") throw new ArgumentException(L.T("DvdCal.WrongChart"));
+        JsonObject current = BuildDvdGeometry();
+        foreach (var pair in current)
+            if (Math.Abs(double.Parse(pair.Value!.ToJsonString(), CultureInfo.InvariantCulture) - chart["geometry"]![pair.Key]!.GetValue<double>()) > 1e-8)
+                throw new ArgumentException(L.T("DvdCal.WrongGeometry"));
+        if (!IsDvdChart) _dvdPriorImageOutputPath = _shell.State.DvdOutputPath;
+        _dvdChartPath = _planPath = Path.GetFullPath(path); _calibration = true;
+        _shell.State.DvdOutputPath = Path.Combine(Path.GetDirectoryName(_dvdChartPath)!, "calibration-43533.iso");
+        _isoPath = _isoSignature = null;
+        Prediction = TargetPreview = ErrorPreview = NativeDitherPreview = TexturePreview = null;
+        DvdViewingSummary = string.Empty;
+        _planSignature = Signature(); IsPreviewCurrent = true; UseForExport = true;
+        ResultSummary = L.T("DvdCal.ChartWarning") + " · " + path;
+        RefreshDvdBindings(); NotifyCommands();
+    }
+
+    internal void ApplyDvdProfile(string path, JsonNode validation)
+    {
+        LeaveDvdChart();
+        DvdProfilePath = Path.GetFullPath(path);
+        DvdProfileSynthetic = validation["calibration"]?["synthetic"]?.GetValue<bool>() == true;
+        double center = (validation["windowStartDeg"]!.GetValue<double>() + validation["windowEndDeg"]!.GetValue<double>()) / 2;
+        DvdGroups.SelectMany(g => g.Fields).Single(f => f.Path == "centerBeta").Value = center.ToString("G", CultureInfo.InvariantCulture);
+        AllowUnmeasured = false; InvalidatePreview(); RefreshDvdBindings(); NotifyCommands();
+    }
+
+    internal void ClearDvdProfile()
+    {
+        LeaveDvdChart(); DvdProfilePath = string.Empty; DvdProfileSynthetic = false;
+        AllowUnmeasured = false; InvalidatePreview(); RefreshDvdBindings(); NotifyCommands();
+    }
+
+    private void LeaveDvdChart()
+    {
+        bool chart = IsDvdChart;
+        _dvdChartPath = null; _calibration = false;
+        if (chart && _dvdPriorImageOutputPath is not null) _shell.State.DvdOutputPath = _dvdPriorImageOutputPath;
+        _dvdPriorImageOutputPath = null;
     }
 }

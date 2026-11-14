@@ -28,6 +28,8 @@ internal static class DisWorker
                 "export" => Export(request),
                 "verify-iso" => Verify(request),
                 "encode-fragment" => Fragment(request),
+                "validate-profile" => ValidateProfile(request),
+                "test-profile-recipes" => TestProfileRecipes(request),
                 _ => throw new ArgumentException("Unsupported DVD color operation."),
             };
             Emit("Completed: " + result, 1);
@@ -41,7 +43,7 @@ internal static class DisWorker
         }
     }
 
-    private static string Hash(string path)
+    internal static string Hash(string path)
     {
         using FileStream stream = File.OpenRead(path);
         return Convert.ToHexString(SHA256.HashData(stream));
@@ -69,7 +71,9 @@ internal static class DisWorker
         design.ColorModelVersion = 2;
         Geometry geometry = config["geometry"]!.Deserialize<Geometry>(Design.Json)!;
         CalibrationFiles.ApplyImport(design, geometry, "Current DIS DVD project geometry");
-        AngleColorSettings.Attach(design);
+        if (!string.IsNullOrWhiteSpace(config["profilePath"]?.GetValue<string>()))
+            DisMeasuredProfile.Attach(design, DisMeasuredProfile.Resolve(plan, directory));
+        else AngleColorSettings.Attach(design);
         if (plan["profileSha256"] is { } profile && profile.GetValue<string>() != design.AngleColor!.ProfileSha256)
             throw new InvalidDataException("The plan uses another measured color profile. Regenerate the preview.");
         if (plan["lutSha256"] is { } lut && lut.GetValue<string>() != design.AngleColor!.LutSha256)
@@ -119,6 +123,7 @@ internal static class DisWorker
         };
         foreach (JsonNode? layer in plan["layers"]!.AsArray())
             layer!["sha256"] = Hash(Path.Combine(directory, layer["file"]!.GetValue<string>()));
+        DisMeasuredProfile.Snapshot(plan, directory);
         Design design = DesignFor(plan, directory, true);
         plan["profileSha256"] = design.AngleColor!.ProfileSha256;
         plan["lutSha256"] = design.AngleColor.LutSha256;
@@ -146,9 +151,29 @@ internal static class DisWorker
 
     private static string Export(JsonObject request)
     {
+        string requestedPlan = Path.GetFullPath(request["planPath"]!.GetValue<string>());
+        if (JsonNode.Parse(File.ReadAllText(requestedPlan))!["schema"]?.GetValue<string>() == DisTextureChart.Schema)
+        {
+            DisTextureChart chart = new(requestedPlan);
+            int workers = Math.Clamp(request["workers"]?.GetValue<int>() ?? Environment.ProcessorCount, 1, 64);
+            Emit("DVD chart CPU workers: " + workers, .01);
+            return ExportFile(request, chart.Plan, requestedPlan, (path, progress) => chart.Generate(path, progress, workers));
+        }
         if (request["allowMediaTransfer"]?.GetValue<bool>() != true)
             throw new InvalidOperationException("Confirm using the 95058 color table for a 43533 trial first.");
         var (plan, design, planPath) = LoadPlan(request);
+        if (plan["calibration"]?["synthetic"]?.GetValue<bool>() == true)
+            throw new InvalidOperationException("软件合成测试色表不能导出实盘镜像。请使用真实照片建立色表。");
+        DvdImageEncoder.ParallelismOverride = Math.Clamp(request["workers"]?.GetValue<int>() is > 0 and var n ? n : Environment.ProcessorCount, 1, 64);
+        Emit("DVD encoding CPU workers: " + DvdImageEncoder.ParallelismOverride, .01);
+        return ExportFile(request, plan, planPath, (path, progress) => DvdImageEncoder.Generate(design, path, progress));
+    }
+
+    private static string ExportFile(JsonObject request, JsonObject plan, string planPath, Func<string, IProgress<EncodingProgress>, EncodedImage> generate)
+    {
+        string planHash = Hash(planPath);
+        if (!JsonNode.DeepEquals(plan, JsonNode.Parse(File.ReadAllText(planPath))))
+            throw new InvalidDataException("导出计划在读取过程中改变，请重新打开原计划。");
         string output = Path.GetFullPath(request["outputPath"]!.GetValue<string>());
         if (!output.EndsWith(".iso", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("A complete DVD image must use .iso.");
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
@@ -159,25 +184,25 @@ internal static class DisWorker
         if (File.Exists(pending))
         {
             JsonObject previous = JsonNode.Parse(File.ReadAllText(pending))!.AsObject();
-            if (previous["planSha256"]?.GetValue<string>() != Hash(planPath))
+            if (previous["planSha256"]?.GetValue<string>() != planHash)
                 throw new InvalidDataException("A completed image for another plan is pending here. Choose another name.");
             Publish(output, previous, pending, overwrite);
             return output;
         }
         string staged = output + ".building-" + Guid.NewGuid().ToString("N") + ".iso";
-        DvdImageEncoder.ParallelismOverride = Math.Clamp(request["workers"]?.GetValue<int>() is > 0 and var n ? n : Environment.ProcessorCount, 1, 64);
-        Emit("DVD encoding CPU workers: " + DvdImageEncoder.ParallelismOverride, .01);
-        EncodedImage result = DvdImageEncoder.Generate(design, staged, new CallbackProgress(p => Emit(p.Message, p.Fraction)));
+        EncodedImage result = generate(staged, new CallbackProgress(p => Emit(p.Message, p.Fraction)));
         JsonObject metadata = new()
         {
-            ["schema"] = ImageSchema, ["planSha256"] = Hash(planPath),
+            ["schema"] = ImageSchema, ["planSha256"] = planHash,
             ["imageSha256"] = result.Sha256, ["bytes"] = result.Bytes,
-            ["designSource"] = plan["designSource"]!.DeepClone(),
+            ["designSource"] = plan["designSource"]?.DeepClone(),
             ["targetMedia"] = plan["targetMedia"]!.DeepClone(), ["physicalColorValidated"] = false,
             ["stagedFile"] = Path.GetFileName(staged), ["noFilesystem"] = true,
         };
         SaveJson(staged + ".json", metadata);
         SaveJson(pending, metadata);
+        if (Hash(planPath) != planHash)
+            throw new InvalidDataException("计划在导出期间改变。已完成数据已保留；恢复完全相同的原计划后可重试提交。");
         Publish(output, metadata, pending, overwrite);
         return output;
     }
@@ -213,13 +238,18 @@ internal static class DisWorker
 
     private static string Verify(JsonObject request)
     {
-        var (_, design, planPath) = LoadPlan(request);
+        string planPath = Path.GetFullPath(request["planPath"]!.GetValue<string>());
+        JsonObject plan = JsonNode.Parse(File.ReadAllText(planPath))!.AsObject();
+        if (plan["calibration"]?["synthetic"]?.GetValue<bool>() == true)
+            throw new InvalidOperationException("软件合成测试色表不能用于实盘镜像。");
+        long sectors = plan["schema"]?.GetValue<string>() == DisTextureChart.Schema
+            ? new DisTextureChart(planPath).Geometry.Sectors : LoadPlan(request).Design.Geometry.Sectors;
         string output = Path.GetFullPath(request["outputPath"]!.GetValue<string>());
         if (!output.EndsWith(".iso", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Select a completed ISO.");
         JsonNode meta = JsonNode.Parse(File.ReadAllText(output + ".json"))!;
         if (meta["schema"]?.GetValue<string>() != ImageSchema || meta["planSha256"]?.GetValue<string>() != Hash(planPath))
             throw new InvalidDataException("This DVD color image belongs to another plan.");
-        long length = checked(design.Geometry.Sectors * 2048);
+        long length = checked(sectors * 2048);
         if (meta["bytes"]!.GetValue<long>() != length || new FileInfo(output).Length != length)
             throw new InvalidDataException("The DVD image is incomplete.");
         Emit("Verifying the complete DVD image SHA-256", .1);
@@ -229,6 +259,16 @@ internal static class DisWorker
 
     private static string Fragment(JsonObject request)
     {
+        string planPath = Path.GetFullPath(request["planPath"]!.GetValue<string>());
+        if (JsonNode.Parse(File.ReadAllText(planPath))!["schema"]?.GetValue<string>() == DisTextureChart.Schema)
+        {
+            string file = request["outputPath"]!.GetValue<string>();
+            if (!file.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Diagnostic fragments must use .bin.");
+            using FileStream target = new(file, FileMode.CreateNew);
+            new DisTextureChart(planPath).Write(target, request["startSector"]!.GetValue<uint>(), request["sectors"]!.GetValue<uint>(),
+                null, request["workers"]?.GetValue<int>() ?? 1);
+            return file;
+        }
         var (_, design, _) = LoadPlan(request);
         string output = request["outputPath"]!.GetValue<string>();
         if (!output.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Diagnostic fragments must use .bin and cannot be burned.");
@@ -240,6 +280,40 @@ internal static class DisWorker
 
     private sealed class CallbackProgress(Action<EncodingProgress> report) : IProgress<EncodingProgress>
     { public void Report(EncodingProgress value) => report(value); }
+
+    private static string ValidateProfile(JsonObject request)
+    {
+        string source = Path.GetFullPath(request["profilePath"]!.GetValue<string>());
+        Geometry? geometry = request["geometry"]?.Deserialize<Geometry>(Design.Json);
+        JsonObject profile = DisMeasuredProfile.Read(source, geometry);
+        string output = request["outputPath"]!.GetValue<string>();
+        SaveJson(output, new JsonObject { ["schema"] = "dis-dvd-profile-validation-v1",
+            ["profileSha256"] = Hash(source), ["calibration"] = profile["disCalibration"]!.DeepClone(),
+            ["windowStartDeg"] = profile["windowStartDeg"]!.DeepClone(), ["windowEndDeg"] = profile["windowEndDeg"]!.DeepClone() });
+        return output;
+    }
+
+    // Diagnostic: compare optimized normalized v3/v5 recipes with the original
+    // scalar DCS resolver across angular/RGB interpolation and motif phases.
+    private static string TestProfileRecipes(JsonObject request)
+    {
+        var map = new ContinuousColorMap(request["profilePath"]!.GetValue<string>());
+        var fast = new FastRecipes(map, map.FastEntries(), .7, .6);
+        Random random = new(43533);
+        const int count = 4096;
+        for (int i = 0; i < count; i++)
+        {
+            Color color = Color.FromArgb(random.Next(256), random.Next(256), random.Next(256));
+            double beta = map.Data.ModelStartDeg + random.NextDouble() * (map.Data.ModelEndDeg - map.Data.ModelStartDeg);
+            ulong turn = (ulong)random.Next(60000), logical = (ulong)random.Next(20_000_000);
+            byte expected = map.SampleByte(color, beta, turn, logical, bandingReduction: .7, adaptiveMixing: .6);
+            if (fast.Sample(color.ToArgb(), beta, turn, logical) != expected)
+                throw new InvalidDataException("Fast/scalar measured recipe mismatch at sample " + i);
+        }
+        string output = request["outputPath"]!.GetValue<string>();
+        SaveJson(output, new JsonObject { ["samples"] = count, ["passed"] = true });
+        return output;
+    }
 
     private static void Retry(Action action)
     {
