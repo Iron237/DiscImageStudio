@@ -141,11 +141,11 @@ public sealed class Renderer : IDisposable
                 attributes.SetColorMatrix(new ColorMatrix(new float[][] {
                     [contrast,0,0,0,0],[0,contrast,0,0,0],[0,0,contrast,0,0],[0,0,0,(float)layer.Opacity,0],[offset,offset,offset,0,1] }));
                 attributes.SetWrapMode(WrapMode.TileFlipXY);
-                // GDI+ cannot reliably rasterize a rotated destination tens of thousands
-                // of pixels wide. Clip the source to this tile, retaining interpolation
-                // neighbours and the original affine transform (no resampling shortcut).
+                // Enlarged layers can exceed GDI+ destination limits even on a
+                // 16384/32768 grid. Bound oversized draws without changing regular
+                // draws; retain interpolation neighbours and the original transform.
                 var src = new RectangleF(0, 0, image.Width, image.Height);
-                if (region.Size >= 65536)
+                if (region.Size >= 65536 || rect.Width > RasterGrid.MaxLegacySize || rect.Height > RasterGrid.MaxLegacySize)
                 {
                     PointF[] corners = [new(0,0),new(bitmap.Width,0),new(0,bitmap.Height),new(bitmap.Width,bitmap.Height)];
                     using var inverse = g.Transform; inverse.Invert(); inverse.TransformPoints(corners);

@@ -4,6 +4,8 @@
 
 ### 中文
 
+- 修复 DVD 全彩导出中放大、旋转图片在 16384／32768 高精度网格触发 GDI+ 绘图异常的问题：超大绘图区域按分块裁切源图并保留插值邻域，维持图层几何、采样精度和并行编码；常规尺寸绘图保留原路径。
+
 - DVD 自建色表支持明确选择的实验建表：可接纳已配准但摆位不稳定的照片并放宽角度插值，保留失败误差和证据，以“未通过标准标定”标记导入、预览和导出选择；默认建表规则不变。
 
 - DVD-R 43533 新增一张盘实测标定流程：直接字节纹理布局和完整标定 ISO、RAW/DNG/sRGB 照片自动定位与四点修正、径向重复及独立混色检查、自建 v3 LUT 与原生预览/编码应用。证据快照与原图哈希绑定；缺测不借用 95058 数据，合成测试色表禁止实盘输出。仍需真实标定照片及新盘效果验证。
@@ -24,6 +26,8 @@
 - 关于页在 GitHub 按钮左侧新增「检查更新」：从上游 GitHub Release 的 `latest.json` 获取正式版信息，按当前处理器架构下载便携 EXE，核对长度与 SHA-256 后替换并重启；替换失败或新版本启动即退出时恢复旧 EXE，应用目录不可写时提示手动下载。更新包与清单未签名，完整性只相对发布清单有意义。
 
 ### English
+
+- Fix GDI+ failures when exporting enlarged, rotated DVD full-color images on 16384/32768 grids. Clip oversized image draws to each tile with interpolation neighbours, preserving layer geometry, raster precision and parallel encoding; retain the original path for regular-size draws.
 
 - Add a DVD-R 43533 trial to native Full Color using inherited design layers/geometry and pinned DiscColorStudio measured 95058/4x angular recipes and track mixing. Include previews, editable parameters, full ISO generation, SHA-256 reuse and existing export/burn workspaces. Color transfer to 43533 remains physically unverified; recording requires single-layer DVD-R. Deploy the DVD worker with the development app.
 - Serialize sidebar probes and burns across native IMAPI STA tasks. Cancelling a probe now retains native ownership until an in-flight device call returns. Offline tests reproduce and eliminate the overlap; the reported first-WRITE timeout still needs a physical retest.

@@ -19,6 +19,12 @@ with immutable photo evidence. FastRecipes also accepts normalized public v3
 entries; scalar/fast and serial/parallel parity are checked for v3 and bundled v5.
 The source 95058 profile and LUT are unchanged.
 
+The DIS renderer also bounds oversized image destinations on 16384/32768 grids
+using the source clipping and interpolation margin previously reserved for grids
+of 65536 or greater. This avoids GDI+ failures for enlarged, rotated photos while
+retaining the original draw path for regular destinations. Layer transforms,
+source resolution, LUT data and DVD channel encoding are unchanged.
+
 The author does not publish the search-chart generator or offline LUT trainer.
 FullColor.Engine/dvdcal is new GPL-3.0 code following the documented measurement
 and convex mixing principle, not a reproduction of the unpublished v5 trainer.

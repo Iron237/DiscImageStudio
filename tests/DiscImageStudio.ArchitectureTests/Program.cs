@@ -37,6 +37,13 @@ if (args is ["--test-fullcolor"])
 if (args is ["--test-dvd-fullcolor"])
 {
     DvdColorWorkflowTests.Run();
+    DvdColorLargeImageExportTests.Run();
+    return;
+}
+
+if (args is ["--test-dvd-large-image-export"])
+{
+    DvdColorLargeImageExportTests.Run();
     return;
 }
 
@@ -197,6 +204,7 @@ Throws<ArgumentException>(() => catalog.Resolve("unknown-command"), "unknown com
 MaximizedWindowBoundsTests.Run();
 FullColorWorkflowTests.Run();
 DvdColorWorkflowTests.Run();
+DvdColorLargeImageExportTests.Run();
 DvdColorCalibrationTests.Run();
 WindowWorkAreaNativeTests.Run();
 BluRayModuleTests.Run();
